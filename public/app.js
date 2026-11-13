@@ -1501,8 +1501,8 @@ peopleSearchInput.addEventListener("input", () => {
   renderPeopleList();
 });
 document.getElementById("peopleMenuBtn").addEventListener("click", () => {
-  const m = document.getElementById("menuBtn");
-  if (m) m.click();
+  const item = document.getElementById("nickItem");
+  if (item) item.click();
 });
 for (const btn of document.querySelectorAll(".pFolder")) {
   btn.addEventListener("click", () => {

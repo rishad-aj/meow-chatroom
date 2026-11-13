@@ -3142,8 +3142,18 @@
   }
   #convoFilter::placeholder { color: #939393; }
   #convoFilter::-webkit-search-cancel-button { cursor: pointer; }
-  body.dark #convoFilter { color: #fff; }
+  #convoFilter::-webkit-search-decoration { display: none; }
+  #convoFilter:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 100px #f4f4f5 inset;
+    -webkit-text-fill-color: #000; caret-color: #000;
+  }
+  body.dark #convoFilter { color: #fff; -webkit-text-fill-color: #fff; }
   body.dark #convoFilter::placeholder { color: #8d8d8d; }
+  body.dark #convoFilter::-webkit-search-cancel-button { filter: invert(1) opacity(.55); }
+  body.dark #convoFilter:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 100px #2c2c2c inset;
+    -webkit-text-fill-color: #fff; caret-color: #fff;
+  }
   /* folder tabs */
   #peopleFolders {
     display: flex; align-items: stretch; flex: none; height: 40px;
