@@ -667,6 +667,7 @@ const dmDelOkBtn = document.getElementById("dmDelOkBtn");
 const dmDelCancelBtn = document.getElementById("dmDelCancelBtn");
 const peopleTitleEl = document.getElementById("peopleTitle");
 const peopleSubEl = document.getElementById("peopleSub");
+let peopleFolder = "all";
 
 /* Wide screens get the desktop messenger layout instead of the phone one: the
    conversation list is a permanent left column, so there is no "back" to click -
@@ -1084,15 +1085,20 @@ function renderPeopleList() {
     renderViewAsList();
     return;
   }
+  const showRoom = peopleFolder !== "chats";
+  const showChats = peopleFolder !== "groups";
   if (isDesk()) {
     peopleTitleEl.textContent = "Chats";
     peopleSubEl.textContent = onlineCount === 1 ? "1 online" : onlineCount + " online";
-    peopleListEl.appendChild(el("div", "pSection", "Room"));
-    peopleListEl.appendChild(roomRow());
   } else {
     peopleTitleEl.textContent = "People";
     peopleSubEl.textContent = "Tap someone to chat privately";
   }
+  if (showRoom && (isDesk() || peopleFolder === "groups")) {
+    peopleListEl.appendChild(el("div", "pSection", "Room"));
+    peopleListEl.appendChild(roomRow());
+  }
+  if (!showChats) return;
   if (!dmAllowed()) {
     peopleListEl.appendChild(el("div", "pSection", "Private chats"));
     peopleListEl.appendChild(el("div", "pEmpty", myName ? "Private chat is for verified users only." : "Connecting…"));
@@ -1494,6 +1500,17 @@ peopleSearchInput.addEventListener("input", () => {
   if (document.activeElement === peopleSearchInput) filterUserTyped = true;
   renderPeopleList();
 });
+document.getElementById("peopleMenuBtn").addEventListener("click", () => {
+  const m = document.getElementById("menuBtn");
+  if (m) m.click();
+});
+for (const btn of document.querySelectorAll(".pFolder")) {
+  btn.addEventListener("click", () => {
+    peopleFolder = btn.dataset.folder || "all";
+    for (const o of document.querySelectorAll(".pFolder")) o.classList.toggle("active", o === btn);
+    renderPeopleList();
+  });
+}
 dmDelCancelBtn.addEventListener("click", () => { dmDelModal.classList.add("hide"); dmDelTarget = ""; });
 dmDelOkBtn.addEventListener("click", async () => {
   const peer = dmDelTarget;
