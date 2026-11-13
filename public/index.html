@@ -2742,7 +2742,7 @@
   }
 
   /* ---------- dark theme ---------- */
-  body.dark { background: #141416; color: #e9e9ee; }
+  body.dark { background: #141416; color: #e9e9ee; color-scheme: dark; }
   body.dark #app {
     background-color: #0e0e10;
     background-image: url("https://user.uploads.dev/file/e5cbf0b27158798a4cebbfe23fa914a7.jpg");
@@ -3218,7 +3218,7 @@
   body.dark .pOnlineDot { background: #00c73e; box-shadow: 0 0 0 2px #212121; }
   .pMain { flex: 1; min-width: 0; }
   .pTop { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .pName { font-weight: 500; font-size: 16px; line-height: 21px; color: #000; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pName { font-weight: 500; font-size: 16px; line-height: 21px; color: #000; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   body.dark .pName { color: #fff; }
   .pMeta { margin-left: auto; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
   .pTick { display: inline-flex; color: #3390ec; flex-shrink: 0; }
@@ -3264,6 +3264,9 @@
   .pRow.active .pOnlineDot { box-shadow: 0 0 0 2px #3390ec; }
   body.dark .pRow.active, body.dark .pRow.active:hover { background: #766ac8; }
   body.dark .pRow.active .pName { color: #fff; }
+  body.dark .pRow.active .pBadge { color: #766ac8; }
+  body.dark .pRow.active .pPreview,
+  body.dark .pRow.active .pTime { color: rgba(255, 255, 255, 0.78); }
   body.dark .pRow.active .pOnlineDot { box-shadow: 0 0 0 2px #766ac8; }
 
   /* ---------- wide screens: desktop layout ----------
