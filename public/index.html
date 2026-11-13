@@ -3108,27 +3108,64 @@
     background: #fff;
   }
   body.dark #peopleScreen { background: #212121; }
-  #peopleHead { padding: 12px 16px 0; text-align: left; }
-  #peopleTitle { font-size: 22px; font-weight: 700; color: #000; letter-spacing: -.2px; }
-  body.dark #peopleTitle { color: #fff; }
-  #peopleSub { display: none; }
+  #peopleHead {
+    display: flex; align-items: center; gap: 6px; flex: none;
+    height: 56px; padding: 7px 8px; text-align: left;
+  }
+  #peopleTitle, #peopleSub { display: none; }
+  .plIconBtn {
+    display: grid; place-items: center; flex: none; width: 40px; height: 40px;
+    border: none; border-radius: 50%; background: none; color: #707579;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: background-color .15s ease, color .15s ease;
+  }
+  .plIconBtn:hover { background: rgba(0, 0, 0, .06); color: #000; }
+  body.dark .plIconBtn { color: #aaa; }
+  body.dark .plIconBtn:hover { background: rgba(255, 255, 255, .08); color: #fff; }
   /* Named so browser autofill heuristics leave it alone: a silently pre-filled
      box would filter the list down to nothing on load. */
+  #peopleSearchWrap {
+    display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+    height: 42px; padding: 0 12px; border-radius: 22px;
+    background: #f4f4f5; color: #939393; cursor: text;
+    transition: background-color .15s ease;
+  }
+  #peopleSearchWrap:focus-within { background: #ececee; }
+  #peopleSearchWrap svg { flex: none; }
+  body.dark #peopleSearchWrap { background: #2c2c2c; color: #8d8d8d; }
+  body.dark #peopleSearchWrap:focus-within { background: #323232; }
   #convoFilter {
-    margin: 10px 12px 6px; padding: 8px 12px 8px 36px; border-radius: 10px;
-    border: none; background: #f4f4f5 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='%23707579' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M16.5 16.5L21 21'/%3E%3C/svg%3E") 12px center no-repeat;
-    color: #000; width: auto; font-size: 14.5px;
+    flex: 1; min-width: 0; height: 100%; padding: 0; margin: 0;
+    border: none; outline: none; background: transparent;
+    color: #000; font-size: 15px;
     -webkit-appearance: none; appearance: none;
   }
   #convoFilter::placeholder { color: #939393; }
-  #convoFilter:focus { outline: none; background-color: #ececee; }
   #convoFilter::-webkit-search-cancel-button { cursor: pointer; }
-  body.dark #convoFilter {
-    background: #2c2c2c url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='%238d8d8d' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M16.5 16.5L21 21'/%3E%3C/svg%3E") 12px center no-repeat;
-    border: none; color: #fff;
-  }
+  body.dark #convoFilter { color: #fff; }
   body.dark #convoFilter::placeholder { color: #8d8d8d; }
-  body.dark #convoFilter:focus { background-color: #333; }
+  /* folder tabs */
+  #peopleFolders {
+    display: flex; align-items: stretch; flex: none; height: 40px;
+    padding: 0 10px; gap: 2px; overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  #peopleFolders::-webkit-scrollbar { display: none; }
+  .pFolder {
+    position: relative; height: 100%; padding: 0 10px;
+    border: none; background: none; border-radius: 8px 8px 0 0;
+    color: #707579; font-size: 14px; font-weight: 500; letter-spacing: .1px;
+    white-space: nowrap; cursor: pointer; transition: color .15s ease;
+  }
+  .pFolder:hover { color: #000; }
+  .pFolder.active { color: #3390ec; }
+  .pFolder.active::after {
+    content: ""; position: absolute; left: 9px; right: 9px; bottom: 0;
+    height: 3px; border-radius: 3px 3px 0 0; background: currentColor;
+  }
+  body.dark .pFolder { color: #aaa; }
+  body.dark .pFolder:hover { color: #fff; }
+  body.dark .pFolder.active { color: #8774e1; }
   #peopleScroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 0 16px; background: #fff; }
   body.dark #peopleScroll { background: #212121; }
   .pSection {
@@ -3227,7 +3264,7 @@
   @media (min-width: 820px) {
     #app {
       display: grid;
-      grid-template-columns: 336px minmax(0, 1fr);
+      grid-template-columns: 380px minmax(0, 1fr);
       grid-template-rows: auto auto minmax(0, 1fr) auto auto;
       grid-template-areas:
         "side header"
@@ -3250,10 +3287,9 @@
     /* The list can never be "closed" here, whatever state the phone view left. */
     #peopleScreen.hide { display: flex !important; }
     #backBtn { display: none; }
-    #peopleHead { padding: 16px 16px 2px; }
-    #convoFilter { margin: 10px 12px 6px; }
+    #peopleHead { padding: 7px 8px; }
     /* Kept centred over the chat pane, not over the list. */
-    #unreadChipBtn, #toast { left: calc(50% + 168px); }
+    #unreadChipBtn, #toast { left: calc(50% + 190px); }
   }
   #dmScrollCtn {
     flex: 1; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column;
@@ -3481,10 +3517,21 @@
 
   <div id="peopleScreen" class="hide">
     <div id="peopleHead">
-      <div id="peopleTitle">People</div>
-      <div id="peopleSub">Tap someone to chat privately</div>
+      <button id="peopleMenuBtn" class="plIconBtn" type="button" title="Menu" aria-label="Menu">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div id="peopleSearchWrap">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/></svg>
+        <input id="convoFilter" type="search" placeholder="Search" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" maxlength="20">
+      </div>
+      <div id="peopleTitle" class="hide">People</div>
+      <div id="peopleSub" class="hide"></div>
     </div>
-    <input id="convoFilter" type="search" placeholder="Search people…" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" maxlength="20">
+    <div id="peopleFolders">
+      <button type="button" class="pFolder active" data-folder="all">All</button>
+      <button type="button" class="pFolder" data-folder="groups">Groups</button>
+      <button type="button" class="pFolder" data-folder="chats">Chats</button>
+    </div>
     <div id="peopleScroll">
       <div id="peopleList"></div>
     </div>
