@@ -153,8 +153,31 @@ function metaSet(key, value) {
 }
 function mapRowToMsg(row) {
   var base = { id: "sb-" + row.id, from: row.sender, ts: Number(row.ts) || 0, flagged: !!row.flagged };
-  if (row.reply_to && !/^\s*\{/.test(String(row.reply_to))) base.replyTo = { id: String(row.reply_to) };
-  else if (row.reply_to) { try { var rp = JSON.parse(row.reply_to); if (rp && rp.id) base.replyTo = { id: String(rp.id) }; } catch (e) {} }
+  if (row.reply_to) {
+    var rawRp = String(row.reply_to);
+    if (!/^\s*\{/.test(rawRp)) {
+      base.replyTo = { id: rawRp };
+      var lm = rawRp.match(/^(\d{12,15})-\d+$/);
+      if (lm) base.replyTo.ts = Number(lm[1]) || 0;
+    } else {
+      try {
+        var rp = JSON.parse(rawRp);
+        if (rp && rp.rp && typeof rp.rp === "object") rp = rp.rp;
+        if (rp && typeof rp === "object" && (rp.id || rp.from || rp.text || rp.url)) {
+          base.replyTo = {
+            id: String(rp.id || ""),
+            from: String(rp.from || ""),
+            t: rp.t || "chat",
+            text: String(rp.text || ""),
+            url: String(rp.url || ""),
+            dur: Number(rp.dur) || 0,
+            size: Number(rp.size) || 0,
+            ts: Number(rp.ts) || 0
+          };
+        }
+      } catch (e) {}
+    }
+  }
   if (row.type === "delnote") {
     var out = { t: "delnote", id: base.id, from: base.from, ts: base.ts };
     if (row.text && String(row.text).indexOf("__deln__") === 0) {

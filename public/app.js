@@ -1418,7 +1418,7 @@ function leaveDm() {
 function renderDmThread(msgs) {
   msgByWrapCleanup(dmMessagesEl);
   dmMessagesEl.textContent = "";
-  for (const m of msgs) if (m && m.t) addMessageDom(m);
+  for (const m of msgs) if (m && m.t) addMessageDom(enrichReply(m));
   if (!msgs.length) dmMessagesEl.appendChild(el("div", "pEmpty", "No messages yet \u2014 say hi."));
   updateBubbleTails();
   scheduleDaySeps();
@@ -3143,17 +3143,19 @@ let editingMsg = null;
 let editDraftBackup = null;
 
 function replySnippetParts(r) {
-  if (r.t === "img") return { label: "Photo", thumb: r.url || null };
+  if (r.t === "img") return { label: String(r.text || "") || "Photo", thumb: r.url || null };
   if (r.t === "voice") return { label: "Voice message", thumb: null };
+  if (r.t === "delnote") return { label: String(r.text || "") || "Deleted message", thumb: null };
   return { label: String(r.text || "") || "Message", thumb: null };
 }
 
-function replyQuoteEl(r, accent) {
-  const q = el("div", "replyQuote");
-  setAccentVars(q, accent);
+function paintReplyQuoteEl(q, r, accent) {
+  const color = accent || nameColor(r.from || "");
+  setAccentVars(q, color);
+  q.textContent = "";
   const name = el("div", "rqName");
   name.textContent = r.from || "";
-  name.style.color = accent;
+  name.style.color = color;
   if (r.from === "admin") name.appendChild(adminBadgeEl());
   const txt = el("div", "rqText");
   const p = replySnippetParts(r);
@@ -3170,7 +3172,12 @@ function replyQuoteEl(r, accent) {
   }
   q.appendChild(name);
   q.appendChild(txt);
-  q.addEventListener("click", (e) => { e.stopPropagation(); scrollToMsgId(r.id); });
+}
+
+function replyQuoteEl(r, accent) {
+  const q = el("div", "replyQuote");
+  paintReplyQuoteEl(q, r, accent);
+  q.addEventListener("click", (e) => { e.stopPropagation(); scrollToMsgId(r); });
   return q;
 }
 
@@ -3180,10 +3187,11 @@ function setReplyTo(m) {
     id: String(m.id || ""),
     from: String(m.from || ""),
     t: m.t || "chat",
-    text: m.t === "chat" ? String(m.text || "") : "",
+    text: m.t === "chat" ? String(m.text || "") : (m.t === "img" ? String(m.caption || "") : ""),
     url: m.url || "",
     dur: m.dur || 0,
     size: m.size || 0,
+    ts: Number(m.ts) || 0,
   };
   replyKvNote(replyToMsg);
   replyNameEl.textContent = replyToMsg.from;
@@ -3231,11 +3239,27 @@ function cancelEdit() {
 
 editCloseBtn.addEventListener("click", cancelEdit);
 
-function scrollToMsgId(id) {
-  if (!id) return;
+function scrollToMsgId(ref) {
+  if (!ref) return;
+  const id = typeof ref === "object" ? String(ref.id || "") : String(ref);
+  const resolvedId = typeof ref === "object" ? String(ref.resolvedId || "") : "";
+  const from = typeof ref === "object" ? String(ref.from || "") : "";
+  const ts = typeof ref === "object" ? (Number(ref.ts) || 0) : 0;
   let target = null;
+  let bestDiff = Infinity;
   for (const n of messagesEl.children) {
-    if (n.dataset && n.dataset.id === id) { target = n; break; }
+    if (!n.dataset) continue;
+    if ((id && n.dataset.id === id) || (resolvedId && n.dataset.id === resolvedId)) {
+      target = n;
+      break;
+    }
+    if (ts && n.dataset.ts) {
+      const nTs = Number(n.dataset.ts) || 0;
+      const diff = Math.abs(nTs - ts);
+      if (from && n.dataset.from === from && diff === 0) { target = n; bestDiff = 0; }
+      else if (from && n.dataset.from === from && diff <= 2000 && diff < bestDiff) { target = n; bestDiff = diff; }
+      else if (!from && diff <= 1500 && diff < bestDiff) { target = n; bestDiff = diff; }
+    }
   }
   if (!target) return;
   target.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -3279,7 +3303,7 @@ function wireReply(wrap, bubble, m) {
 }
 
 replyCloseBtn.addEventListener("click", clearReply);
-replyQuoteBox.addEventListener("click", () => scrollToMsgId(replyToMsg && replyToMsg.id));
+replyQuoteBox.addEventListener("click", () => scrollToMsgId(replyToMsg));
 
 function addUploadPlaceholder(kind, payload) {
   const wrap = el("div", "msg out");
@@ -5075,6 +5099,11 @@ function handleMessage(m) {
     const n = findMsgDom(String(m.id || ""), m.from || null, m.mts != null ? Number(m.mts) : null);
     if (n) {
       if (n.dataset.ts && n.dataset.from && typeof m.text === "string") sbPatchText(n.dataset.ts, n.dataset.from, m.text);
+      const editedObj = msgByWrap.get(n);
+      if (editedObj && typeof m.text === "string") {
+        if (editedObj.t === "img") editedObj.caption = m.text;
+        else editedObj.text = m.text;
+      }
       const bubble = n.querySelector(".bubble");
       if (bubble) {
         if (bubble.classList.contains("imgBubble")) {
@@ -5096,6 +5125,7 @@ function handleMessage(m) {
           ts.insertBefore(el("span", "editedMark", "edited"), ts.firstChild);
         }
       }
+      if (editedObj) updateQuotesForTarget(editedObj);
     }
     scrollBottom();
   } else if (m.t === "flag") {
@@ -5394,9 +5424,100 @@ function flagMsgDom(id) {
 // Clearing the room history must not touch the private-chat mirror: a clear is
 // a room action, and the server's own clearAll preserves DMs too.
 async function sbClearAll() { try { await fetch(SB_URL + "/rest/v1/messages?type=not.like.dm.*", { method: "DELETE", headers: SB_H }); } catch (e) {} }
-function findMsgById(id) {
-  for (const [w, mm] of msgByWrap) if (mm && String(mm.id) === String(id)) return mm;
-  return null;
+function serializeRoomReply(r) {
+  if (!r || (!r.id && !r.from && !r.text && !r.url)) return null;
+  return JSON.stringify({
+    id: String(r.id || ""),
+    from: String(r.from || "").slice(0, 40),
+    t: r.t || "chat",
+    text: String(r.text || "").slice(0, 500),
+    url: String(r.url || "").slice(0, 500),
+    dur: Number(r.dur) || 0,
+    size: Number(r.size) || 0,
+    ts: Number(r.ts) || 0,
+  });
+}
+function parseRoomReply(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (s.charAt(0) === "{") {
+    try {
+      let rp = JSON.parse(s);
+      if (rp && rp.rp && typeof rp.rp === "object") rp = rp.rp;
+      if (rp && typeof rp === "object" && (rp.id || rp.from || rp.text || rp.url)) {
+        const out = {
+          id: String(rp.id || ""),
+          from: String(rp.from || ""),
+          t: rp.t || "chat",
+          text: String(rp.text || ""),
+          url: String(rp.url || ""),
+          dur: Number(rp.dur) || 0,
+          size: Number(rp.size) || 0,
+          ts: Number(rp.ts) || 0,
+        };
+        if (!out.ts && out.id) {
+          const lm = out.id.match(/^(\d{12,15})-\d+$/);
+          if (lm) out.ts = Number(lm[1]) || 0;
+        }
+        return out;
+      }
+    } catch (e) {}
+  }
+  const out = { id: s };
+  const lm = s.match(/^(\d{12,15})-\d+$/);
+  if (lm) out.ts = Number(lm[1]) || 0;
+  return out;
+}
+function isReplyIncomplete(r) {
+  if (!r) return false;
+  if (!r.from) return true;
+  if (r.t === "img" || r.t === "voice") return false;
+  return !String(r.text || "").trim();
+}
+function applyTargetToReply(r, t) {
+  if (!r || !t) return false;
+  if (t.t === "delnote") {
+    if (t.orig && typeof t.orig === "object" && isReplyIncomplete(r)) {
+      const o = t.orig;
+      r.from = String(o.from || t.from || r.from || "");
+      r.t = o.t || "chat";
+      r.text = o.t === "img" ? String(o.caption || o.text || "") : String(o.text || "");
+      r.url = String(o.url || "");
+      r.dur = Number(o.dur) || 0;
+      r.size = Number(o.size) || 0;
+      if (t.ts) r.ts = Number(t.ts) || r.ts || 0;
+      if (t.id) r.resolvedId = String(t.id);
+      return true;
+    }
+    return false;
+  }
+  r.from = String(t.from || r.from || "");
+  r.t = t.t || "chat";
+  r.text = t.t === "img" ? String(t.caption || t.text || "") : String(t.text || "");
+  r.url = String(t.url || "");
+  r.dur = Number(t.dur) || 0;
+  r.size = Number(t.size) || 0;
+  if (t.ts) r.ts = Number(t.ts) || r.ts || 0;
+  if (t.id) r.resolvedId = String(t.id);
+  return true;
+}
+function findMsgById(id, from, ts) {
+  const sid = id ? String(id) : "";
+  const nts = Number(ts) || 0;
+  let best = null;
+  let bestDiff = Infinity;
+  for (const [, mm] of msgByWrap) {
+    if (!mm) continue;
+    if (sid && String(mm.id) === sid) return mm;
+    if (nts && mm.ts) {
+      const diff = Math.abs((Number(mm.ts) || 0) - nts);
+      if (from && mm.from === from && diff === 0) return mm;
+      if (from && mm.from === from && diff <= 2000 && diff < bestDiff) { best = mm; bestDiff = diff; }
+      else if (!from && mm.t !== "delnote" && diff <= 1500 && diff < bestDiff) { best = mm; bestDiff = diff; }
+    }
+  }
+  return best;
 }
 function findMsgDom(id, from, mts) {
   // Every conversation's rendered DOM, so a room-side delete still lands while
@@ -5411,34 +5532,136 @@ function findMsgDom(id, from, mts) {
   return null;
 }
 function enrichReply(m) {
-  if (m && m.replyTo && m.replyTo.id) {
-    const t = findMsgById(m.replyTo.id);
+  if (m && m.replyTo && (m.replyTo.id || m.replyTo.ts)) {
+    const r = m.replyTo;
+    const t = findMsgById(r.id, r.from, r.ts);
     if (t) {
-      m.replyTo.from = t.from;
-      m.replyTo.t = t.t || "chat";
-      m.replyTo.text = t.text || "";
-      m.replyTo.url = t.url || "";
-      m.replyTo.dur = t.dur || 0;
-      m.replyTo.size = t.size || 0;
-    } else {
+      applyTargetToReply(r, t);
+    } else if (isReplyIncomplete(r)) {
       // The quoted message isn't loaded (its row is on another page, or it was
       // only ever seen live) - fall back to the snapshot this browser kept in kv.
-      const s = replyKvGet(m.replyTo.id);
-      if (s) {
-        m.replyTo.from = s.from;
-        m.replyTo.t = s.t || "chat";
-        m.replyTo.text = s.text || "";
-        m.replyTo.url = s.url || "";
-        m.replyTo.dur = s.dur || 0;
-        m.replyTo.size = s.size || 0;
-      }
+      const s = replyKvGet(r.id, r.ts);
+      if (s) applyTargetToReply(r, s);
     }
   }
   return m;
 }
+function updateQuotesForTarget(target) {
+  if (!target) return;
+  const tid = String(target.id || "");
+  const tfrom = String(target.from || "");
+  const tts = Number(target.ts) || 0;
+  for (const host of msgContainers()) {
+    for (const n of host.children) {
+      const mm = msgByWrap.get(n);
+      if (!mm || !mm.replyTo) continue;
+      const r = mm.replyTo;
+      const match = (tid && (r.id === tid || r.resolvedId === tid))
+        || (tts && r.ts && Math.abs(r.ts - tts) <= 1500 && (!r.from || r.from === tfrom));
+      if (!match) continue;
+      if (applyTargetToReply(r, target)) {
+        const q = n.querySelector(".replyQuote");
+        if (q) paintReplyQuoteEl(q, r, nameColor(r.from));
+        replyKvNote(r);
+      }
+    }
+  }
+}
+function rehydrateReplyQuotesInDom(host) {
+  const box = host || roomMessagesEl;
+  if (!box) return;
+  for (const n of box.children) {
+    const mm = msgByWrap.get(n);
+    if (!mm || !mm.replyTo || !isReplyIncomplete(mm.replyTo)) continue;
+    enrichReply(mm);
+    if (!isReplyIncomplete(mm.replyTo)) {
+      const q = n.querySelector(".replyQuote");
+      if (q) paintReplyQuoteEl(q, mm.replyTo, nameColor(mm.replyTo.from));
+    }
+  }
+}
+const replyFetchTried = new Set();
+async function resolveMissingReplies(host) {
+  const box = host || roomMessagesEl;
+  if (!box) return;
+  const sbTargets = new Map();
+  const liveTargets = [];
+  for (const n of box.children) {
+    const mm = msgByWrap.get(n);
+    if (!mm || !mm.replyTo || !isReplyIncomplete(mm.replyTo)) continue;
+    const r = mm.replyTo;
+    const key = String(r.id || "");
+    if (!key || replyFetchTried.has(key)) continue;
+    const sbM = key.match(/^sb-(\d+)$/);
+    if (sbM) {
+      const numId = sbM[1];
+      if (!sbTargets.has(numId)) sbTargets.set(numId, []);
+      sbTargets.get(numId).push({ wrap: n, msg: mm });
+      continue;
+    }
+    const liveM = key.match(/^(\d{12,15})-\d+$/);
+    if (liveM) {
+      liveTargets.push({ wrap: n, msg: mm, key, tsHint: Number(liveM[1]) || 0 });
+    }
+  }
+  const resolved = [];
+  if (sbTargets.size) {
+    const ids = [...sbTargets.keys()];
+    for (const numId of ids) replyFetchTried.add("sb-" + numId);
+    for (let i = 0; i < ids.length; i += 40) {
+      const chunk = ids.slice(i, i + 40);
+      const url = SB_URL + "/rest/v1/messages?select=" + HISTORY_SEL + "&id=in.(" + chunk.join(",") + ")";
+      const rows = await sbFetchRows(url);
+      for (const row of rows) {
+        const targetMsg = sbRowToMsg(row);
+        if (!targetMsg) continue;
+        const waiters = sbTargets.get(String(row.id)) || [];
+        for (const w of waiters) resolved.push({ wrap: w.wrap, msg: w.msg, target: targetMsg });
+      }
+    }
+  }
+  if (liveTargets.length) {
+    const byKey = new Map();
+    for (const item of liveTargets) {
+      replyFetchTried.add(item.key);
+      if (!byKey.has(item.key)) byKey.set(item.key, { tsHint: item.tsHint, items: [] });
+      byKey.get(item.key).items.push(item);
+    }
+    const entries = [...byKey.values()];
+    for (let i = 0; i < entries.length; i += 10) {
+      const chunk = entries.slice(i, i + 10);
+      const clauses = chunk.map((e) => "and(ts.gte." + (e.tsHint - 3000) + ",ts.lte." + (e.tsHint + 3000) + ")");
+      const url = SB_URL + "/rest/v1/messages?select=" + HISTORY_SEL + "&" + SB_ROOM_ONLY + "&or=(" + clauses.join(",") + ")&limit=100";
+      const rows = await sbFetchRows(url);
+      const parsed = rows.map(sbRowToMsg).filter(Boolean);
+      for (const e of chunk) {
+        for (const item of e.items) {
+          let best = null;
+          let bestDiff = Infinity;
+          for (const cand of parsed) {
+            if (cand.id === item.msg.id) continue;
+            if (cand.ts && item.msg.ts && Number(cand.ts) === Number(item.msg.ts) && cand.from === item.msg.from) continue;
+            const diff = Math.abs((Number(cand.ts) || 0) - e.tsHint);
+            if (diff <= 3000 && diff < bestDiff) { best = cand; bestDiff = diff; }
+          }
+          if (best) resolved.push({ wrap: item.wrap, msg: item.msg, target: best });
+        }
+      }
+    }
+  }
+  for (const hit of resolved) {
+    const r = hit.msg.replyTo;
+    if (applyTargetToReply(r, hit.target)) {
+      const q = hit.wrap.querySelector(".replyQuote");
+      if (q) paintReplyQuoteEl(q, r, nameColor(r.from));
+      replyKvNote(r);
+    }
+  }
+}
 function sbRowToMsg(row) {
   const base = { id: "sb-" + row.id, from: row.sender, ts: row.ts, flagged: !!row.flagged };
-  if (row.reply_to) base.replyTo = { id: String(row.reply_to) };
+  const parsedRp = parseRoomReply(row.reply_to);
+  if (parsedRp) base.replyTo = parsedRp;
   if (row.type === "delnote") {
     const out = Object.assign(base, { t: "delnote" });
     if (row.text && String(row.text).indexOf("__deln__") === 0) {
@@ -5565,6 +5788,10 @@ async function loadOlder() {
     const real = rows.filter(rowDomWorth).reverse();
     let added = 0;
     if (real.length) added = prependRows(real);
+    if (added > 0) {
+      rehydrateReplyQuotesInDom(roomMessagesEl);
+      resolveMissingReplies(roomMessagesEl);
+    }
     if (rows.length < OLDER_PAGE) allOlderLoaded = true;
     if (added === 0) allOlderLoaded = true;
     olderFailures = 0;
@@ -5643,6 +5870,8 @@ async function loadHistoryCore() {
   historyLoading = false;
   showOlderLoader(false);
   flushHistoryBuffer();
+  rehydrateReplyQuotesInDom(roomMessagesEl);
+  resolveMissingReplies(roomMessagesEl);
   reclassifyOwnership();
   if (translateOn) translateViewport();
   // The room row in a wide layout previews the newest room message.
@@ -5729,7 +5958,7 @@ function sendChat() {
     // A room row is written with a room `type`. Private messages are mirrored
     // too, but under a "dm."-tagged row that the room's queries exclude (see
     // SB_DM_ON) - never as a room row.
-    sbInsert({ ts, sender: myName, type: "chat", text, reply_to: replyToMsg ? String(replyToMsg.id || "") : null });
+    sbInsert({ ts, sender: myName, type: "chat", text, reply_to: serializeRoomReply(replyToMsg) });
   }
   clearReply();
   hideMentionPop();
@@ -5834,6 +6063,7 @@ async function sendVoice() {
   const blob = await stopRecording();
   if (!blob || !blob.size || !socket || socket.readyState !== 1) return;
   const dur = Math.round(recElapsed * 10) / 10;
+  const replySnap = replyToMsg ? Object.assign({}, replyToMsg) : null;
   const ph = addUploadPlaceholder("voice");
   try {
     const { url, error } = await root.uploadPlugin(blob);
@@ -5841,10 +6071,10 @@ async function sendVoice() {
     const vts = Date.now();
     rememberSentTs(vts);
     if (convo.mode === "dm") {
-      dmSend({ sub: "voice", url, dur, size: blob.size, replyTo: replyToMsg, ts: vts });
+      dmSend({ sub: "voice", url, dur, size: blob.size, replyTo: replySnap, ts: vts });
     } else {
-      socket.send(JSON.stringify({ t: "voice", url, dur, size: blob.size, replyTo: replyToMsg, ts: vts }));
-      sbInsert({ ts: vts, sender: myName, type: "voice", url, dur, size: blob.size, reply_to: replyToMsg ? String(replyToMsg.id || "") : null });
+      socket.send(JSON.stringify({ t: "voice", url, dur, size: blob.size, replyTo: replySnap, ts: vts }));
+      sbInsert({ ts: vts, sender: myName, type: "voice", url, dur, size: blob.size, reply_to: serializeRoomReply(replySnap) });
     }
     clearReply();
   } catch (e) {
@@ -6307,16 +6537,17 @@ capSendBtn.addEventListener("click", async () => {
   URL.revokeObjectURL(capImg.src);
   capImg.src = "";
   captionModal.classList.add("hide");
+  const replySnap = replyToMsg ? Object.assign({}, replyToMsg) : null;
   if (gifUrl) {
-    const m = { t: "img", url: gifUrl, replyTo: replyToMsg };
+    const m = { t: "img", url: gifUrl, replyTo: replySnap };
     if (caption) m.caption = caption;
     m.ts = Date.now();
     rememberSentTs(m.ts);
     if (convo.mode === "dm") {
-      dmSend({ sub: "img", url: gifUrl, caption: caption || undefined, replyTo: replyToMsg, ts: m.ts });
+      dmSend({ sub: "img", url: gifUrl, caption: caption || undefined, replyTo: replySnap, ts: m.ts });
     } else {
       socket.send(JSON.stringify(m));
-      sbInsert({ ts: m.ts, sender: myName, type: "img", url: gifUrl, text: caption || null, reply_to: replyToMsg ? String(replyToMsg.id || "") : null });
+      sbInsert({ ts: m.ts, sender: myName, type: "img", url: gifUrl, text: caption || null, reply_to: serializeRoomReply(replySnap) });
     }
     clearReply();
     updateSendBtn();
@@ -6329,15 +6560,15 @@ capSendBtn.addEventListener("click", async () => {
       new Promise((_, reject) => setTimeout(() => reject(new Error("upload timeout")), 30000))
     ]);
     if (error || !url) { removeUploadPlaceholder(ph); toast("Upload failed: " + (error || "unknown error")); return; }
-    const m = { t: "img", url, replyTo: replyToMsg };
+    const m = { t: "img", url, replyTo: replySnap };
     if (caption) m.caption = caption;
     m.ts = Date.now();
     rememberSentTs(m.ts);
     if (convo.mode === "dm") {
-      dmSend({ sub: "img", url, caption: caption || undefined, replyTo: replyToMsg, ts: m.ts });
+      dmSend({ sub: "img", url, caption: caption || undefined, replyTo: replySnap, ts: m.ts });
     } else {
       socket.send(JSON.stringify(m));
-      sbInsert({ ts: m.ts, sender: myName, type: "img", url, text: caption || null, reply_to: replyToMsg ? String(replyToMsg.id || "") : null });
+      sbInsert({ ts: m.ts, sender: myName, type: "img", url, text: caption || null, reply_to: serializeRoomReply(replySnap) });
     }
     clearReply();
   } catch (e) {
@@ -7780,7 +8011,7 @@ function rxKvPush(list) {
    reload. So this browser keeps a snapshot of every message it has seen quoted,
    in kv, so the quotes survive a reload. Join/left notices are *not* stored. */
 const REPLY_KV_KEY = "tgReplies_" + (window.generatorName || "chat");
-const REPLY_KV_MAX = 300;
+const REPLY_KV_MAX = 600;
 const replySaved = new Map();
 let replyKvLoadPromise = null;
 
@@ -7834,16 +8065,36 @@ async function replyKvNote(r) {
     url: String(r.url || "").slice(0, 500),
     dur: Number(r.dur) || 0,
     size: Number(r.size) || 0,
+    ts: Number(r.ts) || 0,
   };
   replySaved.delete(id);
   replySaved.set(id, snap);
+  if (r.resolvedId && String(r.resolvedId) !== id) {
+    const rid = String(r.resolvedId);
+    replySaved.delete(rid);
+    replySaved.set(rid, snap);
+  }
   while (replySaved.size > REPLY_KV_MAX) replySaved.delete(replySaved.keys().next().value);
   replyKvSave();
 }
 
-function replyKvGet(id) {
-  if (!id) return null;
-  return replySaved.get(String(id)) || null;
+function replyKvGet(id, ts) {
+  if (id) {
+    const exact = replySaved.get(String(id));
+    if (exact) return exact;
+  }
+  const nts = Number(ts) || 0;
+  if (nts) {
+    let best = null;
+    let bestDiff = Infinity;
+    for (const [, v] of replySaved) {
+      if (!v || !v.ts) continue;
+      const diff = Math.abs(v.ts - nts);
+      if (diff <= 1500 && diff < bestDiff) { best = v; bestDiff = diff; }
+    }
+    if (best) return best;
+  }
+  return null;
 }
 
 function rxRender(bubble, m) {
