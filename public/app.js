@@ -606,6 +606,8 @@ const monitorMessagesEl = document.getElementById("monitorMessagesEl");
    wheel, touch, trackpad and programmatic scrolling. */
 const stickyWrap = document.getElementById("stickyDateWrap");
 const stickyPill = document.getElementById("stickyDate");
+const stickyTopbarEl = document.getElementById("topbar");
+const stickyPinnedEl = document.getElementById("pinnedBar");
 let stickyHideT = null;
 let stickyRaf = 0;
 let stickyLastTop = -1;
@@ -614,14 +616,42 @@ function stickyActive() {
   if (scrollCtnEl === dmScrollEl) return { sc: dmScrollEl, list: document.getElementById("dmMessagesEl") };
   return { sc: roomScrollCtn, list: roomMessagesEl };
 }
+function stickyHideNow() {
+  clearTimeout(stickyHideT);
+  stickyLastTop = -1;
+  if (stickyWrap) stickyWrap.classList.remove("show");
+}
 function stickyPlace() {
+  if (!stickyWrap || !appHost) return null;
+  if (stickyWrap.parentElement !== appHost) appHost.appendChild(stickyWrap);
   const { sc } = stickyActive();
-  if (stickyWrap.parentElement !== sc) sc.insertBefore(stickyWrap, sc.firstChild);
+  if (!sc || sc.classList.contains("hide")) { stickyHideNow(); return null; }
+  const scRect = sc.getBoundingClientRect();
+  if (scRect.width <= 0 || scRect.height <= 0) { stickyHideNow(); return null; }
+  const appRect = appHost.getBoundingClientRect();
+  let topEdge = scRect.top - appRect.top;
+  if (stickyTopbarEl && !stickyTopbarEl.classList.contains("hide")) {
+    const tr = stickyTopbarEl.getBoundingClientRect();
+    if (tr.height > 0) topEdge = Math.max(topEdge, tr.bottom - appRect.top);
+  }
+  if (stickyPinnedEl && !stickyPinnedEl.classList.contains("hide") && sc === roomScrollCtn) {
+    const pr = stickyPinnedEl.getBoundingClientRect();
+    if (pr.height > 0) topEdge = Math.max(topEdge, pr.bottom - appRect.top);
+  }
+  if (sc === monitorScrollEl && monitorBarEl) {
+    const mr = monitorBarEl.getBoundingClientRect();
+    if (mr.height > 0) topEdge = Math.max(topEdge, mr.bottom - appRect.top);
+  }
+  stickyWrap.style.top = Math.round(topEdge + 8) + "px";
+  stickyWrap.style.left = Math.round(scRect.left - appRect.left) + "px";
+  stickyWrap.style.width = Math.round(sc.clientWidth || scRect.width) + "px";
+  stickyWrap.style.right = "auto";
+  return appRect.top + topEdge;
 }
 function stickyShow() {
-  stickyPlace();
-  const { sc, list } = stickyActive();
-  const top = sc.getBoundingClientRect().top;
+  const visibleTop = stickyPlace();
+  if (visibleTop == null) return;
+  const { list } = stickyActive();
   let label = "";
   const kids = list.children;
   for (let i = 0; i < kids.length; i++) {
@@ -630,7 +660,7 @@ function stickyShow() {
     const ts = Number(n.dataset && n.dataset.ts) || 0;
     if (!ts) continue;
     label = fmtDatePill(new Date(ts));
-    if (n.getBoundingClientRect().bottom > top + 48) break;
+    if (n.getBoundingClientRect().bottom > visibleTop + 28) break;
   }
   if (label && stickyPill.textContent !== label) stickyPill.textContent = label;
   if (!label) return;
@@ -649,6 +679,9 @@ function stickyOnScroll() {
 for (const scroller of [roomScrollCtn, dmScrollEl, monitorScrollEl]) {
   scroller.addEventListener("scroll", stickyOnScroll, { passive: true });
 }
+window.addEventListener("resize", () => {
+  if (stickyWrap && stickyWrap.classList.contains("show")) stickyPlace();
+});
 const peopleScreen = document.getElementById("peopleScreen");
 const peopleHead = document.getElementById("peopleHead");
 const peopleListEl = document.getElementById("peopleList");
@@ -1357,6 +1390,7 @@ async function refreshPeople() {
 }
 
 function openPeople() {
+  stickyHideNow();
   if (selectionMode) endSelection();
   leaveDm();
   convo = { mode: "people", peer: "" };
@@ -1376,6 +1410,7 @@ function openPeople() {
 }
 
 function showRoom() {
+  stickyHideNow();
   if (selectionMode) endSelection();
   leaveDm();
   peopleOpen = false;
@@ -1430,6 +1465,7 @@ async function openDm(name) {
   if (!peer || peer === myName) return;
   if (!canDm(peer)) return;
   if (convo.mode === "dm" && convo.peer === peer) return;
+  stickyHideNow();
   if (selectionMode) endSelection();
   leaveDm();
   peopleOpen = false;
