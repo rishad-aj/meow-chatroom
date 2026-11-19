@@ -395,15 +395,16 @@
      look as the in-list day separators). Zero-height so it never shifts the
      messages; shown on scroll, auto-hidden after 3s idle. */
   #stickyDateWrap {
-    position: sticky;
-    top: 8px;
+    position: absolute;
+    top: 64px;
+    left: 0;
+    right: 0;
     height: 0;
     overflow: visible;
-    z-index: 25;
+    z-index: 26;
     display: flex;
     justify-content: center;
     pointer-events: none;
-    order: -1;
   }
   #stickyDate {
     align-self: flex-start;
@@ -3555,7 +3556,6 @@
       padding-bottom: calc(var(--compose-h, 68px) + 2px);
       min-height: 0;
     }
-    #stickyDateWrap { top: 78px; }
     #menuPop:not(.fromList),
     #textSizePop:not(.fromList) {
       top: 72px;
@@ -3800,9 +3800,11 @@
     <button id="pinUnpinBtn" title="Unpin" aria-label="Unpin"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </div>
 
+  <div id="stickyDateWrap"><div id="stickyDate" class="hide"></div></div>
+
   <div id="scrollCtn">
     <div id="olderLoader" class="hide"><span class="miniSpinner"></span><span>Loading older messages…</span></div>
-    <div id="messagesEl"><div id="stickyDateWrap"><div id="stickyDate" class="hide"></div></div></div>
+    <div id="messagesEl"></div>
   </div>
 
   <div id="dmScrollCtn" class="hide">
