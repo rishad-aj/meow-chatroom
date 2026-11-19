@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Chat Room</title>
 <meta name="description" content="Free online group chat room. No sign-up.">
-<meta name="theme-color" content="#2563eb">
+<meta property="og:title" content="Chat Room">
+<meta property="og:description" content="Free online group chat room. No sign-up.">
+<meta name="theme-color" content="#212121">
 <link rel="manifest" href="https://user.uploads.dev/file/25455502383c588f70e0be7cce93247d.json">
 <link rel="apple-touch-icon" href="https://user.uploads.dev/file/b6802c73e0b623361cc1949c6b29a267.png">
 <style>
@@ -245,17 +247,28 @@
   /* ---------- 3-dot menu ---------- */
   #menuPop {
     position: absolute;
-    top: 52px;
-    right: 8px;
-    background: rgba(255, 255, 255, 0.6);
+    top: 56px;
+    right: 10px;
+    background: rgba(255, 255, 255, 0.86);
     backdrop-filter: blur(18px) saturate(150%);
     -webkit-backdrop-filter: blur(18px) saturate(150%);
     color: #333;
     border-radius: 12px;
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
     padding: 6px 0;
-    min-width: 190px;
-    z-index: 60;
+    min-width: 196px;
+    z-index: 65;
+  }
+  #menuPop.fromList {
+    top: 56px;
+    left: 10px;
+    right: auto;
+  }
+  @media (min-width: 820px) {
+    #menuPop.fromList {
+      top: 64px;
+      left: 18px;
+    }
   }
   .popItem { padding: 11px 18px; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 11px; }
   .popItem svg { flex: none; width: 18px; height: 18px; color: #6b7684; }
@@ -269,7 +282,7 @@
   /* ---------- header translate popup ---------- */
   #translatePop {
     position: absolute;
-    top: 52px;
+    top: 56px;
     right: 58px;
     background: #fff;
     color: #333;
@@ -277,7 +290,12 @@
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
     padding: 12px 12px 8px;
     width: 240px;
-    z-index: 60;
+    z-index: 65;
+  }
+  #translatePop.fromList {
+    top: 56px;
+    left: 10px;
+    right: auto;
   }
   #translatePop .tpopRow { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
   #translatePop .tpopLabel { font-size: 14px; font-weight: 600; }
@@ -287,15 +305,27 @@
   #translatePop .tpopGrid button.active { background: #2678b6; color: #fff; border-color: #2678b6; }
   #textSizePop {
     position: absolute;
-    top: 52px;
-    right: 8px;
+    top: 56px;
+    right: 10px;
     background: #fff;
     color: #333;
     border-radius: 12px;
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3);
     padding: 12px 12px 10px;
     width: 190px;
-    z-index: 60;
+    z-index: 65;
+  }
+  #textSizePop.fromList {
+    top: 56px;
+    left: 10px;
+    right: auto;
+  }
+  @media (min-width: 820px) {
+    #translatePop.fromList,
+    #textSizePop.fromList {
+      top: 64px;
+      left: 18px;
+    }
   }
   #textSizePop .tpopRow { display: flex; align-items: center; margin-bottom: 10px; }
   #textSizePop .tpopLabel { font-size: 14px; font-weight: 600; }
@@ -2742,7 +2772,7 @@
   }
 
   /* ---------- dark theme ---------- */
-  body.dark { background: #141416; color: #e9e9ee; color-scheme: dark; }
+  body.dark { background: #141416; color: #e9e9ee; }
   body.dark #app {
     background-color: #0e0e10;
     background-image: url("https://user.uploads.dev/file/e5cbf0b27158798a4cebbfe23fa914a7.jpg");
@@ -3102,103 +3132,185 @@
     box-shadow: 0 0 0 2px #4c7ca4; pointer-events: none;
   }
   body.dark #backBadge { box-shadow: 0 0 0 2px #141416; }
-  /* ---------- chat list: Telegram Web theme ---------- */
+  /* Mobile & narrow viewports: edge-to-edge full-screen chat list (NOT floating).
+     Floating card appearance applies strictly on PC (@media min-width: 820px). */
   #peopleScreen {
     flex: 1; min-height: 0; display: flex; flex-direction: column;
-    background: #fff;
+    background: #ffffff;
+    margin: 0;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+    overflow: hidden;
   }
-  body.dark #peopleScreen { background: #212121; }
+  body.dark #peopleScreen {
+    background: #1f1f21;
+    box-shadow: none;
+  }
+  @media (max-width: 819px) {
+    #app.peopleMode #topbar { display: none; }
+  }
   #peopleHead {
-    display: flex; align-items: center; gap: 6px; flex: none;
-    height: 56px; padding: 7px 8px; text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px 8px;
+    flex-shrink: 0;
   }
-  #peopleTitle, #peopleSub { display: none; }
-  .plIconBtn {
-    display: grid; place-items: center; flex: none; width: 40px; height: 40px;
-    border: none; border-radius: 50%; background: none; color: #707579;
-    cursor: pointer; -webkit-tap-highlight-color: transparent;
-    transition: background-color .15s ease, color .15s ease;
+  #peopleTitle, #peopleSub { display: none !important; }
+  #peopleMenuBtn {
+    width: 40px; height: 40px; border-radius: 50%; border: none;
+    background: transparent; color: #5f6368;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; padding: 0; flex-shrink: 0;
+    transition: background 0.15s ease, color 0.15s ease;
   }
-  .plIconBtn:hover { background: rgba(0, 0, 0, .06); color: #000; }
-  body.dark .plIconBtn { color: #aaa; }
-  body.dark .plIconBtn:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+  #peopleMenuBtn:hover { background: rgba(0, 0, 0, 0.06); color: #111; }
+  body.dark #peopleMenuBtn { color: #e5e5ea; }
+  body.dark #peopleMenuBtn:hover { background: rgba(255, 255, 255, 0.09); color: #fff; }
   /* Named so browser autofill heuristics leave it alone: a silently pre-filled
      box would filter the list down to nothing on load. */
-  #peopleSearchWrap {
-    display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
-    height: 42px; padding: 0 12px; border-radius: 22px;
-    background: #f4f4f5; color: #939393; cursor: text;
-    transition: background-color .15s ease;
-  }
-  #peopleSearchWrap:focus-within { background: #ececee; }
-  #peopleSearchWrap svg { flex: none; }
-  body.dark #peopleSearchWrap { background: #2c2c2c; color: #8d8d8d; }
-  body.dark #peopleSearchWrap:focus-within { background: #323232; }
   #convoFilter {
-    flex: 1; min-width: 0; height: 100%; padding: 0; margin: 0;
-    border: none; outline: none; background: transparent;
-    color: #000; font-size: 15px;
+    flex: 1; min-width: 0; height: 42px;
+    margin: 0; padding: 0 16px 0 42px; border-radius: 999px;
+    border: 1px solid transparent;
+    background: #f1f2f6 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='%238e8e93' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M16.5 16.5L21 21'/%3E%3C/svg%3E") 14px center no-repeat;
+    color: #111; font-size: 15px; outline: none;
     -webkit-appearance: none; appearance: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
   }
-  #convoFilter::placeholder { color: #939393; }
+  #convoFilter:focus { border-color: #8774e1; }
   #convoFilter::-webkit-search-cancel-button { cursor: pointer; }
-  #convoFilter::-webkit-search-decoration { display: none; }
-  #convoFilter:-webkit-autofill {
-    -webkit-box-shadow: 0 0 0 100px #f4f4f5 inset;
-    -webkit-text-fill-color: #000; caret-color: #000;
+  body.dark #convoFilter {
+    background: #2b2b2d url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='%238e8e93' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M16.5 16.5L21 21'/%3E%3C/svg%3E") 14px center no-repeat;
+    color: #f2f2f7;
   }
-  body.dark #convoFilter { color: #fff; -webkit-text-fill-color: #fff; }
-  body.dark #convoFilter::placeholder { color: #8d8d8d; }
-  body.dark #convoFilter::-webkit-search-cancel-button { filter: invert(1) opacity(.55); }
-  body.dark #convoFilter:-webkit-autofill {
-    -webkit-box-shadow: 0 0 0 100px #2c2c2c inset;
-    -webkit-text-fill-color: #fff; caret-color: #fff;
+  body.dark #convoFilter:focus {
+    background-color: #262629;
+    border-color: rgba(135, 116, 225, 0.7);
   }
-  /* folder tabs */
-  #peopleFolders {
-    display: flex; align-items: stretch; flex: none; height: 40px;
-    padding: 0 10px; gap: 2px; overflow-x: auto; overflow-y: hidden;
-    scrollbar-width: none;
+  body.dark #convoFilter::placeholder { color: #8e8e93; }
+  /* ---------- Folder tabs pill bar ---------- */
+  #chatFolders {
+    display: flex; align-items: center; justify-content: space-between; gap: 4px;
+    margin: 2px 10px 8px; padding: 4px;
+    border-radius: 999px;
+    background: #f0f1f6;
+    border: 1px solid rgba(0, 0, 0, 0.04);
+    flex-shrink: 0;
   }
-  #peopleFolders::-webkit-scrollbar { display: none; }
-  .pFolder {
-    position: relative; height: 100%; padding: 0 10px;
-    border: none; background: none; border-radius: 8px 8px 0 0;
-    color: #707579; font-size: 14px; font-weight: 500; letter-spacing: .1px;
-    white-space: nowrap; cursor: pointer; transition: color .15s ease;
+  body.dark #chatFolders {
+    background: #171719;
+    border-color: rgba(255, 255, 255, 0.055);
   }
-  .pFolder:hover { color: #000; }
-  .pFolder.active { color: #3390ec; }
-  .pFolder.active::after {
-    content: ""; position: absolute; left: 9px; right: 9px; bottom: 0;
-    height: 3px; border-radius: 3px 3px 0 0; background: currentColor;
+  .cfTab {
+    flex: 1; min-width: 0;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 7px 10px; border-radius: 999px; border: none;
+    background: transparent; color: #6e7378;
+    font-size: 14px; font-weight: 600; font-family: inherit;
+    cursor: pointer; white-space: nowrap;
+    transition: background 0.16s ease, color 0.16s ease;
   }
-  body.dark .pFolder { color: #aaa; }
-  body.dark .pFolder:hover { color: #fff; }
-  body.dark .pFolder.active { color: #8774e1; }
-  #peopleScroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 0 16px; background: #fff; }
-  body.dark #peopleScroll { background: #212121; }
+  .cfTab:hover { color: #111; }
+  body.dark .cfTab { color: #a1a1a8; }
+  body.dark .cfTab:hover { color: #ececf1; }
+  .cfTab.active {
+    background: #ffffff;
+    color: #7762db;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+  body.dark .cfTab.active {
+    background: #2b273a;
+    color: #9b88f7;
+    box-shadow: none;
+  }
+  .cfBadge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 22px; height: 19px; padding: 0 6px;
+    border-radius: 999px;
+    background: #8774e1; color: #ffffff;
+    font-size: 11.5px; font-weight: 700; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+  .cfBadge.hide { display: none !important; }
+  /* ---------- Dismissible profile prompt banner inside chat list ---------- */
+  #chatListPromo {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
+    margin: 0 10px 8px; padding: 10px 12px;
+    border-radius: 14px;
+    background: #f6f6fa;
+    border: 1px solid rgba(0, 0, 0, 0.055);
+    cursor: pointer; flex-shrink: 0;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  #chatListPromo:hover { background: #efeff7; }
+  body.dark #chatListPromo {
+    background: rgba(255, 255, 255, 0.025);
+    border-color: rgba(255, 255, 255, 0.06);
+  }
+  body.dark #chatListPromo:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .clpText { min-width: 0; flex: 1; }
+  .clpTitle { font-size: 14px; font-weight: 700; color: #111; line-height: 1.25; }
+  body.dark .clpTitle { color: #f5f5f7; }
+  .clpSub { font-size: 12.5px; color: #707579; margin-top: 2px; line-height: 1.3; }
+  body.dark .clpSub { color: #8e8e93; }
+  #chatPromoClose {
+    width: 26px; height: 26px; border-radius: 50%; border: none;
+    background: transparent; color: #8e8e93;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; padding: 0; flex-shrink: 0; margin-top: -2px; margin-right: -4px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  #chatPromoClose:hover { background: rgba(128, 128, 128, 0.16); color: #111; }
+  body.dark #chatPromoClose:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+  #peopleScroll {
+    flex: 1; overflow-y: auto; overscroll-behavior: contain;
+    padding: 0 0 14px; background: transparent;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(142, 142, 147, 0.35) transparent;
+  }
+  #peopleScroll::-webkit-scrollbar { width: 5px; }
+  #peopleScroll::-webkit-scrollbar-track { background: transparent; }
+  #peopleScroll::-webkit-scrollbar-thumb { background: rgba(142, 142, 147, 0.32); border-radius: 999px; }
   .pSection {
-    padding: 14px 16px 4px; font-size: 12.5px; font-weight: 600;
-    letter-spacing: 0; text-transform: none; color: #707579;
+    padding: 10px 18px 4px; font-size: 11px; font-weight: 600;
+    letter-spacing: 0.3px; color: #8a94a0;
   }
-  body.dark .pSection { color: #aaa; }
+  body.dark .pSection { color: #7d828a; }
   .pRow {
-    display: flex; align-items: center; gap: 12px; min-height: 72px;
-    padding: 9px 12px; cursor: pointer; background: transparent; border: none;
-    border-radius: 0; transition: background-color .12s ease;
-    -webkit-tap-highlight-color: transparent; user-select: none;
+    display: flex; align-items: center; gap: 12px;
+    margin: 2px 8px; padding: 8px 11px;
+    border-radius: 14px; cursor: pointer;
+    background: transparent; border-bottom: none;
+    transition: background 0.14s ease;
+    position: relative;
+    min-height: 68px;
   }
-  .pRow:hover { background: #f4f4f5; }
+  .pRow:hover { background: rgba(0, 0, 0, 0.045); }
   body.dark .pRow { background: transparent; }
-  body.dark .pRow:hover { background: #2c2c2c; }
+  body.dark .pRow:hover { background: rgba(255, 255, 255, 0.055); }
   .pAvatar {
-    position: relative; width: 54px; height: 54px; border-radius: 50%; flex-shrink: 0;
-    color: #fff; font-weight: 500; font-size: 22px; letter-spacing: .2px;
-    display: flex; align-items: center; justify-content: center; overflow: hidden;
-    text-transform: uppercase;
+    position: relative; width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0;
+    color: #fff; font-weight: 700; font-size: 19px; display: flex; align-items: center;
+    justify-content: center; overflow: visible; text-transform: uppercase;
   }
   .pAvatar .avImg { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+  .pAvStoryBadge {
+    position: absolute; right: -2px; bottom: -1px;
+    min-width: 19px; height: 19px; padding: 0 3px;
+    border-radius: 999px;
+    background: #8e8e93; color: #fff;
+    font-size: 9.5px; font-weight: 700; line-height: 15px;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px dotted #ffffff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+    text-transform: lowercase;
+    pointer-events: none;
+  }
   .ghostSvg { display: block; width: 62%; height: auto; }
   .hasGhost { display: flex; align-items: center; justify-content: center; }
   #avatarLetter { display: flex; align-items: center; justify-content: center; }
@@ -3213,33 +3325,49 @@
   .pAvatar.adminAvatar { background: linear-gradient(135deg, #d4a017, #a87900); }
   .pOnlineDot {
     position: absolute; right: 1px; bottom: 1px; width: 13px; height: 13px;
-    border-radius: 50%; background: #0ac630; box-shadow: 0 0 0 2px #fff;
+    border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 2.5px #ffffff;
   }
-  body.dark .pOnlineDot { background: #00c73e; box-shadow: 0 0 0 2px #212121; }
-  .pMain { flex: 1; min-width: 0; }
-  .pTop { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .pName { font-weight: 500; font-size: 16px; line-height: 21px; color: #000; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  body.dark .pName { color: #fff; }
-  .pMeta { margin-left: auto; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-  .pTick { display: inline-flex; color: #3390ec; flex-shrink: 0; }
-  .pTime { font-size: 12px; line-height: 16px; color: #707579; flex-shrink: 0; }
-  body.dark .pTime { color: #aaa; }
-  .pRow.hasUnread .pTime { color: #4fae4e; font-weight: 500; }
-  body.dark .pRow.hasUnread .pTime { color: #4fae4e; }
-  .pPreview { font-size: 14px; line-height: 19px; color: #707579; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  body.dark .pPreview { color: #aaa; }
+  body.dark .pOnlineDot { box-shadow: 0 0 0 2.5px #1f1f21; }
+  .pRow.active .pOnlineDot { box-shadow: 0 0 0 2.5px #8774e1; }
+  .pMain { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+  .pTop { display: flex; align-items: center; gap: 5px; min-width: 0; }
+  .pBottom { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .pName { font-weight: 700; font-size: 15.5px; line-height: 1.25; color: #111; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body.dark .pName { color: #f5f5f7; }
+  .pMuteIco { display: inline-flex; align-items: center; color: #8e8e93; flex-shrink: 0; opacity: 0.85; }
+  body.dark .pMuteIco { color: #8e8e93; }
+  .pMeta { margin-left: auto; display: flex; align-items: center; gap: 4px; flex-shrink: 0; padding-left: 6px; }
+  .pTick { display: inline-flex; color: #8774e1; flex-shrink: 0; }
+  .pTime { font-size: 12px; color: #8d8d93; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  body.dark .pTime { color: #8e8e93; }
+  .pRow.hasUnread .pTime { color: #707579; font-weight: 500; }
+  body.dark .pRow.hasUnread .pTime { color: #9ea3ab; }
+  .pPreview {
+    flex: 1; min-width: 0;
+    font-size: 14px; line-height: 1.3; color: #707579; margin-top: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    display: flex; align-items: center; gap: 4px;
+  }
+  body.dark .pPreview { color: #98989f; }
+  .pSender { color: #1c1c1e; font-weight: 600; flex-shrink: 0; }
+  body.dark .pSender { color: #f0f0f4; font-weight: 600; }
+  .pPreviewText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+  .pFwdIco { display: inline-flex; align-items: center; flex-shrink: 0; opacity: 0.9; }
+  .pPin { display: inline-flex; align-items: center; justify-content: center; color: #8e8e93; margin-left: auto; flex-shrink: 0; }
   .pBadge {
-    margin-left: 6px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px;
-    background: #4fae4e; color: #fff; font-size: 12px; font-weight: 500;
-    line-height: 1; display: inline-flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
+    margin-left: auto; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px;
+    background: #6f7378; color: #fff; font-size: 12px; font-weight: 700;
+    line-height: 22px; text-align: center; flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
   }
+  .pRow.unreadAccent .pBadge { background: #8774e1; }
   .pDel {
-    width: 32px; height: 32px; flex-shrink: 0; border: none; background: none;
-    color: #8fa4b2; border-radius: 50%; display: flex; align-items: center;
+    width: 28px; height: 28px; flex-shrink: 0; border: none; background: none;
+    color: #8fa4b2; border-radius: 50%; display: none; align-items: center;
     justify-content: center; cursor: pointer; padding: 0;
   }
-  .pDel:hover { background: #fde8e8; color: #c62828; }
+  .pRow:hover .pDel { display: flex; }
+  .pDel:hover { background: rgba(229, 57, 53, 0.16); color: #ef5350; }
   /* The admin's one-tap verification button, in the same slot a conversation
      row uses for its delete button. */
   .pAct {
@@ -3250,34 +3378,43 @@
   .pAct:hover { background: #e2f6ec; color: #12744a; }
   .pRow.pPending { cursor: default; }
   .pRow.pPending:hover { background: none; }
-  .pEmpty { padding: 64px 24px; text-align: center; color: #707579; font-size: 13.5px; line-height: 19px; }
-  body.dark .pEmpty { color: #aaa; }
-  /* The room's own row in the desktop list (a group chat is a row there too). */
-  .pAvatar.roomAv { background: linear-gradient(180deg, #72d5fd 0%, #2a9ef1 100%); }
-  .pRow.active, .pRow.active:hover { background: #3390ec; }
-  .pRow.active .pName { color: #fff; }
-  .pRow.active .pPreview, .pRow.active .pTime { color: rgba(255, 255, 255, 0.78); }
-  .pRow.active .pTick { color: #fff; }
-  .pRow.active .pBadge { background: #fff; color: #3390ec; }
-  .pRow.active .pDel { color: rgba(255, 255, 255, 0.8); }
-  .pRow.active .pDel:hover { background: rgba(0, 0, 0, 0.15); color: #fff; }
-  .pRow.active .pOnlineDot { box-shadow: 0 0 0 2px #3390ec; }
-  body.dark .pRow.active, body.dark .pRow.active:hover { background: #766ac8; }
-  body.dark .pRow.active .pName { color: #fff; }
-  body.dark .pRow.active .pBadge { color: #766ac8; }
-  body.dark .pRow.active .pPreview,
-  body.dark .pRow.active .pTime { color: rgba(255, 255, 255, 0.78); }
-  body.dark .pRow.active .pOnlineDot { box-shadow: 0 0 0 2px #766ac8; }
+  .pEmpty { padding: 28px 14px; text-align: center; color: #7b93a3; font-size: 13.5px; line-height: 1.5; white-space: pre-line; }
+  body.dark .pEmpty { color: #8f959d; }
+  /* The room's own row in the list (styled like the pinned Saved Messages card). */
+  .pAvatar.roomAv { background: #8774e1; }
+  .pRow.active {
+    background: #8774e1 !important;
+  }
+  .pRow.active .pName,
+  .pRow.active .pTime,
+  .pRow.active .pSender,
+  .pRow.active .pTick,
+  .pRow.active .pPin,
+  .pRow.active .pMuteIco,
+  .pRow.active .pFwdIco {
+    color: #ffffff !important;
+  }
+  .pRow.active .pPreview,
+  .pRow.active .pPreviewText {
+    color: rgba(255, 255, 255, 0.92) !important;
+  }
+  .pRow.active .pAvatar.roomAv {
+    background: rgba(255, 255, 255, 0.24) !important;
+  }
+  .pRow.active .pBadge {
+    background: #ffffff;
+    color: #8774e1;
+  }
+  .pRow.active .pDel { color: rgba(255, 255, 255, 0.85); }
+  .pRow.active .pDel:hover { background: rgba(0, 0, 0, 0.2); color: #fff; }
 
-  /* ---------- wide screens: desktop layout ----------
-     On a wide screen there is no "back" to click: the conversation list is a
-     permanent left column (room + private chats, the same rows the phone shows
-     on the People screen) and the room/private chat fills the pane beside it.
-     The grid only re-*places* the existing elements - nothing is duplicated. */
+  /* ---------- wide screens: desktop layout (floating chat list ONLY on PC) ----------
+     On PC (>= 820px) the conversation list floats as a rounded card over the
+     app wallpaper on the left; on mobile (< 820px) it is full-bleed edge-to-edge. */
   @media (min-width: 820px) {
     #app {
       display: grid;
-      grid-template-columns: 380px minmax(0, 1fr);
+      grid-template-columns: 392px minmax(0, 1fr);
       grid-template-rows: auto auto minmax(0, 1fr) auto auto;
       grid-template-areas:
         "side header"
@@ -3293,16 +3430,27 @@
     #composeBar, #selActionBar { grid-area: compose; }
     #emojiPanel, #gifPanel { grid-area: panels; }
     #peopleScreen {
-      grid-area: side; flex: none; height: 100%; min-height: 0; width: 100%;
-      border-right: 1px solid #e6e6e6;
+      grid-area: side; flex: none;
+      height: calc(100% - 16px);
+      min-height: 0;
+      width: calc(100% - 16px);
+      margin: 8px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.1);
+      z-index: 12;
     }
-    body.dark #peopleScreen { border-right-color: #303030; }
+    body.dark #peopleScreen {
+      background: #1f1f21;
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      box-shadow: 0 12px 38px rgba(0, 0, 0, 0.68), 0 2px 10px rgba(0, 0, 0, 0.45);
+    }
     /* The list can never be "closed" here, whatever state the phone view left. */
     #peopleScreen.hide { display: flex !important; }
     #backBtn { display: none; }
-    #peopleHead { padding: 7px 8px; }
     /* Kept centred over the chat pane, not over the list. */
-    #unreadChipBtn, #toast { left: calc(50% + 190px); }
+    #unreadChipBtn, #toast { left: calc(50% + 196px); }
   }
   #dmScrollCtn {
     flex: 1; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column;
@@ -3443,56 +3591,6 @@
       <button id="menuBtn" class="iconBtn" title="More" aria-label="More">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>
       </button>
-      <div id="translatePop" class="hide">
-        <div class="tpopRow">
-          <span class="tpopLabel">Translate</span>
-          <button id="tpopToggle" class="switch"></button>
-        </div>
-        <div class="tpopLangTitle">Translate to</div>
-        <div class="tpopGrid"></div>
-      </div>
-      <div id="textSizePop" class="hide">
-        <div class="tpopRow"><span class="tpopLabel">Text size</span></div>
-        <div class="tsizeGrid">
-          <button data-size="s">Small</button>
-          <button data-size="m" class="active">Medium</button>
-          <button data-size="l">Large</button>
-        </div>
-      </div>
-      <div id="menuPop" class="hide">
-        <div class="popItem" id="nickItem">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 21v-1.8a3.7 3.7 0 0 0-3.7-3.7H8.2a3.7 3.7 0 0 0-3.7 3.7V21"/><circle cx="12" cy="7.2" r="3.7"/><path d="M20.2 9.3l1.6 1.6-4.1 4.1h-1.6v-1.6z"/></svg>
-          <span class="popLabel">Edit profile</span>
-        </div>
-        <div class="popItem" id="themeItem">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-          <span class="popLabel">Theme: Light</span>
-        </div>
-        <div class="popItem" id="soundItem">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
-          <span class="popLabel">Sound &amp; notifications: On</span>
-        </div>
-        <div class="popItem" id="translateItem">
-          <svg viewBox="0 0 52 52" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M39,18.67H35.42l-4.2,11.12A29,29,0,0,1,20.6,24.91a28.76,28.76,0,0,0,7.11-14.49h5.21a2,2,0,0,0,0-4H19.67V2a2,2,0,1,0-4,0V6.42H2.41a2,2,0,0,0,0,4H7.63a28.73,28.73,0,0,0,7.1,14.49A29.51,29.51,0,0,1,3.27,30a2,2,0,0,0,.43,4,1.61,1.61,0,0,0,.44-.05,32.56,32.56,0,0,0,13.53-6.25,32,32,0,0,0,12.13,5.9L22.83,52H28l2.7-7.76H43.64L46.37,52h5.22Zm-15.3-8.25a23.76,23.76,0,0,1-6,11.86,23.71,23.71,0,0,1-6-11.86Zm8.68,29.15,4.83-13.83L42,39.57Z"></path></svg>
-          <span class="popLabel">Translation</span>
-        </div>
-        <div class="popItem" id="textSizeItem">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4V20M17 12V20M6 20H10M15 20H19M13 7V4H3V7M21 14V12H13V14"/></svg>
-          <span class="popLabel">Text size: Medium</span>
-        </div>
-        <div class="popItem" id="installItem">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M4 20h16"/></svg>
-          <span class="popLabel">Download</span>
-        </div>
-        <div class="popItem hide" id="adminItem">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10z"/><path d="M9.5 11.5l2 2 3.5-3.5"/></svg>
-          <span class="popLabel">Admin panel</span>
-        </div>
-        <div class="popItem danger" id="clearItem">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg>
-          <span class="popLabel">Clear chat</span>
-        </div>
-      </div>
     </div>
     <div id="selBar">
       <button id="selCloseBtn" class="iconBtn selIcon" title="Cancel selection" aria-label="Cancel selection">
@@ -3508,6 +3606,56 @@
       </div>
     </div>
   </header>
+  <div id="translatePop" class="hide">
+    <div class="tpopRow">
+      <span class="tpopLabel">Translate</span>
+      <button id="tpopToggle" class="switch"></button>
+    </div>
+    <div class="tpopLangTitle">Translate to</div>
+    <div class="tpopGrid"></div>
+  </div>
+  <div id="textSizePop" class="hide">
+    <div class="tpopRow"><span class="tpopLabel">Text size</span></div>
+    <div class="tsizeGrid">
+      <button data-size="s">Small</button>
+      <button data-size="m" class="active">Medium</button>
+      <button data-size="l">Large</button>
+    </div>
+  </div>
+  <div id="menuPop" class="hide">
+    <div class="popItem" id="nickItem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 21v-1.8a3.7 3.7 0 0 0-3.7-3.7H8.2a3.7 3.7 0 0 0-3.7 3.7V21"/><circle cx="12" cy="7.2" r="3.7"/><path d="M20.2 9.3l1.6 1.6-4.1 4.1h-1.6v-1.6z"/></svg>
+      <span class="popLabel">Edit profile</span>
+    </div>
+    <div class="popItem" id="themeItem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <span class="popLabel">Theme: Light</span>
+    </div>
+    <div class="popItem" id="soundItem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+      <span class="popLabel">Sound &amp; notifications: On</span>
+    </div>
+    <div class="popItem" id="translateItem">
+      <svg viewBox="0 0 52 52" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M39,18.67H35.42l-4.2,11.12A29,29,0,0,1,20.6,24.91a28.76,28.76,0,0,0,7.11-14.49h5.21a2,2,0,0,0,0-4H19.67V2a2,2,0,1,0-4,0V6.42H2.41a2,2,0,0,0,0,4H7.63a28.73,28.73,0,0,0,7.1,14.49A29.51,29.51,0,0,1,3.27,30a2,2,0,0,0,.43,4,1.61,1.61,0,0,0,.44-.05,32.56,32.56,0,0,0,13.53-6.25,32,32,0,0,0,12.13,5.9L22.83,52H28l2.7-7.76H43.64L46.37,52h5.22Zm-15.3-8.25a23.76,23.76,0,0,1-6,11.86,23.71,23.71,0,0,1-6-11.86Zm8.68,29.15,4.83-13.83L42,39.57Z"></path></svg>
+      <span class="popLabel">Translation</span>
+    </div>
+    <div class="popItem" id="textSizeItem">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4V20M17 12V20M6 20H10M15 20H19M13 7V4H3V7M21 14V12H13V14"/></svg>
+      <span class="popLabel">Text size: Medium</span>
+    </div>
+    <div class="popItem" id="installItem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M4 20h16"/></svg>
+      <span class="popLabel">Download</span>
+    </div>
+    <div class="popItem hide" id="adminItem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10z"/><path d="M9.5 11.5l2 2 3.5-3.5"/></svg>
+      <span class="popLabel">Admin panel</span>
+    </div>
+    <div class="popItem danger" id="clearItem">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg>
+      <span class="popLabel">Clear chat</span>
+    </div>
+  </div>
   <div id="pinnedBar" class="hide">
     <span class="pinIco"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l1 7 3 3v2H5v-2l3-3z"/><path d="M12 16v5"/></svg></span>
     <div class="pinTxt"><b id="pinFrom">Pinned message</b><span id="pinPreview"></span></div>
@@ -3530,20 +3678,32 @@
 
   <div id="peopleScreen" class="hide">
     <div id="peopleHead">
-      <button id="peopleMenuBtn" class="plIconBtn" type="button" title="Menu" aria-label="Menu">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      <button id="peopleMenuBtn" type="button" title="Menu" aria-label="Menu">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <div id="peopleSearchWrap">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/></svg>
-        <input id="convoFilter" type="search" placeholder="Search" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" maxlength="20">
-      </div>
+      <input id="convoFilter" type="search" placeholder="Search" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" maxlength="20">
       <div id="peopleTitle" class="hide">People</div>
-      <div id="peopleSub" class="hide"></div>
+      <div id="peopleSub" class="hide">Tap someone to chat privately</div>
     </div>
-    <div id="peopleFolders">
-      <button type="button" class="pFolder active" data-folder="all">All</button>
-      <button type="button" class="pFolder" data-folder="groups">Groups</button>
-      <button type="button" class="pFolder" data-folder="chats">Chats</button>
+    <div id="chatFolders" role="tablist" aria-label="Chat folders">
+      <button type="button" class="cfTab active" data-folder="all" role="tab" aria-selected="true">
+        <span>All</span><span class="cfBadge hide" id="cfBadgeAll">0</span>
+      </button>
+      <button type="button" class="cfTab" data-folder="personal" role="tab" aria-selected="false">
+        <span>Personal</span><span class="cfBadge hide" id="cfBadgePersonal">0</span>
+      </button>
+      <button type="button" class="cfTab" data-folder="important" role="tab" aria-selected="false">
+        <span>Important</span><span class="cfBadge hide" id="cfBadgeImportant">0</span>
+      </button>
+    </div>
+    <div id="chatListPromo" role="button" tabindex="0">
+      <div class="clpText">
+        <div class="clpTitle">Complete your profile</div>
+        <div class="clpSub">Add a photo and nickname so contacts recognize you.</div>
+      </div>
+      <button id="chatPromoClose" type="button" title="Dismiss" aria-label="Dismiss">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
     </div>
     <div id="peopleScroll">
       <div id="peopleList"></div>
