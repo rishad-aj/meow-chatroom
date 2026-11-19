@@ -650,18 +650,88 @@ for (const scroller of [roomScrollCtn, dmScrollEl, monitorScrollEl]) {
   scroller.addEventListener("scroll", stickyOnScroll, { passive: true });
 }
 const peopleScreen = document.getElementById("peopleScreen");
+const peopleHead = document.getElementById("peopleHead");
 const peopleListEl = document.getElementById("peopleList");
 const peopleSearchInput = document.getElementById("convoFilter");
 const peopleMenuBtn = document.getElementById("peopleMenuBtn");
 const chatFoldersEl = document.getElementById("chatFolders");
+const cfIndicator = document.getElementById("cfIndicator");
 const cfBadgeAll = document.getElementById("cfBadgeAll");
-const cfBadgePersonal = document.getElementById("cfBadgePersonal");
-const cfBadgeImportant = document.getElementById("cfBadgeImportant");
+const cfBadgePrivate = document.getElementById("cfBadgePrivate");
+const cfBadgeRoom = document.getElementById("cfBadgeRoom");
 const chatListPromo = document.getElementById("chatListPromo");
 const chatPromoClose = document.getElementById("chatPromoClose");
 const PROMO_DISMISS_KEY = "tgChatPromoDismiss_" + (window.generatorName || "chat");
 let activeFolder = "all";
 let chatPromoDismissed = lsGet(PROMO_DISMISS_KEY) === "1";
+let cfIndicatorReady = false;
+let cfAnimatingUntil = 0;
+
+function syncFolderIndicator(animate) {
+  if (!chatFoldersEl || !cfIndicator) return;
+  const activeTab = chatFoldersEl.querySelector(".cfTab.active");
+  if (!activeTab) return;
+  const w = activeTab.offsetWidth;
+  if (!w) {
+    cfIndicatorReady = false;
+    return;
+  }
+  if (!animate && Date.now() < cfAnimatingUntil) return;
+  const shouldAnim = !!animate && cfIndicatorReady;
+  if (shouldAnim) {
+    cfAnimatingUntil = Date.now() + 310;
+  } else {
+    cfIndicator.classList.add("noAnim");
+  }
+  cfIndicator.style.width = w + "px";
+  cfIndicator.style.transform = "translateX(" + activeTab.offsetLeft + "px)";
+  cfIndicator.style.opacity = "1";
+  if (!shouldAnim) {
+    // Force layout flush so the subsequent transition re-enables cleanly.
+    void cfIndicator.offsetWidth;
+    cfIndicator.classList.remove("noAnim");
+  }
+  cfIndicatorReady = true;
+}
+if (chatFoldersEl && typeof ResizeObserver !== "undefined") {
+  new ResizeObserver(() => syncFolderIndicator(false)).observe(chatFoldersEl);
+}
+
+/* Browsers (especially Microsoft Edge) insist on autofilling this box with our
+   saved username and painting it white. Keep it readonly until real user
+   interaction and ignore any value that arrives while readonly or unfocused. */
+let filterUserTyped = false;
+if (peopleSearchInput) {
+  const unlockSearch = () => {
+    if (peopleSearchInput.readOnly) peopleSearchInput.readOnly = false;
+  };
+  peopleSearchInput.addEventListener("pointerdown", unlockSearch);
+  peopleSearchInput.addEventListener("touchstart", unlockSearch, { passive: true });
+  peopleSearchInput.addEventListener("keydown", (e) => {
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key !== "Tab" && e.key !== "Escape") {
+      unlockSearch();
+      filterUserTyped = true;
+    }
+  });
+  peopleSearchInput.addEventListener("focus", (e) => {
+    if (e.isTrusted && peopleSearchInput.matches && peopleSearchInput.matches(":focus-visible")) {
+      unlockSearch();
+    }
+  });
+  peopleSearchInput.addEventListener("blur", () => {
+    if (!peopleSearchInput.value) {
+      filterUserTyped = false;
+      peopleSearchInput.readOnly = true;
+    }
+  });
+  peopleSearchInput.addEventListener("animationstart", (e) => {
+    if (e.animationName === "convoAutofillStart" && !filterUserTyped) {
+      peopleSearchInput.value = "";
+      peopleSearchInput.readOnly = true;
+      renderPeopleList();
+    }
+  });
+}
 
 function syncChatPromo() {
   if (!chatListPromo) return;
@@ -694,17 +764,10 @@ if (chatFoldersEl) {
         t.classList.toggle("active", on);
         t.setAttribute("aria-selected", on ? "true" : "false");
       });
-      renderPeopleList();
+      renderPeopleList(true);
     });
   });
 }
-/* Browsers insist on autofilling this box (with our own nickname, no less), and
-   they do it by replaying a *trusted* focus/keydown/input sequence at load -
-   which would silently filter the list down to nothing. The one thing autofill
-   never does is actually put the caret in the field, so text only counts as the
-   user's if the field is the active element when it arrives. Anything else in
-   the box is treated as junk and wiped by the next render. */
-let filterUserTyped = false;
 const backBtn = document.getElementById("backBtn");
 const backBadge = document.getElementById("backBadge");
 const dmDelModal = document.getElementById("dmDelModal");
@@ -1156,7 +1219,7 @@ function adminThreadRow(t) {
 function sanitizeFilter() {
   if (!filterUserTyped && peopleSearchInput.value) peopleSearchInput.value = "";
 }
-function renderPeopleList() {
+function renderPeopleList(animateTabs) {
   sanitizeFilter();
   syncChatPromo();
   peopleHead.classList.remove("hide");
@@ -1181,17 +1244,19 @@ function renderPeopleList() {
     ? adminDmThreads.filter((t) => t && t.a && t.b && t.a !== myName && t.b !== myName && (match(t.a) || match(t.b)))
     : [];
 
-  // Update live folder tab counts (real data, never hardcoded).
+  // Update live folder notification badges (unread counts only, never total chat counts).
   const allowed = dmAllowed();
-  const totalPersonal = allowed ? allDmCandidates.filter((n) => byPeer.has(n) || onlineNames.has(n)).length : 0;
-  const importantPeers = allowed
-    ? allDmCandidates.filter((n) => (Number(dmUnreadMap[n]) || 0) > 0 || n === "admin")
-    : [];
-  const totalAll = 1 + totalPersonal + (isAdmin() ? adminDmThreads.filter((t) => t && t.a && t.b && t.a !== myName && t.b !== myName).length : 0);
-  const totalImportant = 1 + importantPeers.length;
-  setFolderBadge(cfBadgeAll, totalAll);
-  setFolderBadge(cfBadgePersonal, totalPersonal);
-  setFolderBadge(cfBadgeImportant, totalImportant);
+  const roomNotif = Math.max(0, Number(unreadCount) || 0);
+  const privateNotif = allowed ? dmUnreadTotal() : 0;
+  const allNotif = roomNotif + privateNotif;
+  setFolderBadge(cfBadgeAll, allNotif);
+  setFolderBadge(cfBadgePrivate, privateNotif);
+  setFolderBadge(cfBadgeRoom, roomNotif);
+  if (animateTabs) {
+    syncFolderIndicator(true);
+  } else {
+    requestAnimationFrame(() => syncFolderIndicator(false));
+  }
 
   peopleListEl.textContent = "";
   // The admin's "view as" session replaces the whole list with that person's
@@ -1212,7 +1277,7 @@ function renderPeopleList() {
 
   const roomMatches = !q || roomTitleText.toLowerCase().indexOf(q) !== -1;
 
-  if (activeFolder === "personal") {
+  if (activeFolder === "private") {
     if (!allowed) {
       peopleListEl.appendChild(el("div", "pEmpty", myName ? "Private chat is for verified users only." : "Connecting…"));
       return;
@@ -1220,26 +1285,16 @@ function renderPeopleList() {
     for (const peer of chats) peopleListEl.appendChild(personRow(peer, byPeer.get(peer)));
     for (const peer of fresh) peopleListEl.appendChild(personRow(peer, null));
     if (!chats.length && !fresh.length) {
-      peopleListEl.appendChild(el("div", "pEmpty", q ? "No conversations match that search" : "No private chats yet.\nVerified people appear here when online."));
+      peopleListEl.appendChild(el("div", "pEmpty", q ? "No private chats match that search" : "No private chats yet.\nVerified people appear here when online."));
     }
     return;
   }
 
-  if (activeFolder === "important") {
-    let any = false;
+  if (activeFolder === "room") {
     if (roomMatches) {
       peopleListEl.appendChild(roomRow());
-      any = true;
-    }
-    if (allowed) {
-      const impList = [...chats, ...fresh].filter((n) => (Number(dmUnreadMap[n]) || 0) > 0 || n === "admin");
-      for (const peer of impList) {
-        peopleListEl.appendChild(personRow(peer, byPeer.get(peer) || null));
-        any = true;
-      }
-    }
-    if (!any) {
-      peopleListEl.appendChild(el("div", "pEmpty", q ? "No important chats match that search" : "No important chats yet."));
+    } else {
+      peopleListEl.appendChild(el("div", "pEmpty", "No room matches that search"));
     }
     return;
   }
@@ -1315,6 +1370,7 @@ function openPeople() {
   composeBar.classList.add("hide");
   applyHeader();
   renderPeopleList();
+  requestAnimationFrame(() => syncFolderIndicator(false));
   refreshPeople();
   startPeopleTimer();
 }
@@ -1323,7 +1379,7 @@ function showRoom() {
   if (selectionMode) endSelection();
   leaveDm();
   peopleOpen = false;
-  clearInterval(peopleTimer);
+  if (!isDesk()) clearInterval(peopleTimer);
   convo = { mode: "room", peer: "" };
   messagesEl = roomMessagesEl;
   scrollCtnEl = roomScrollCtn;
@@ -1335,7 +1391,6 @@ function showRoom() {
   syncComposeH();
   retargetTailObserver();
   applyHeader();
-  refreshListView();
   if (roomHistoryStale) { roomHistoryStale = false; reloadChatHistory(); }
   unreadCount = addNewMsgsBanner();
   if (unreadCount) {
@@ -1344,6 +1399,7 @@ function showRoom() {
   } else {
     scrollBottom(true);
   }
+  refreshListView();
   if (interactionReady()) msgInput.focus();
 }
 
@@ -1377,7 +1433,7 @@ async function openDm(name) {
   if (selectionMode) endSelection();
   leaveDm();
   peopleOpen = false;
-  clearInterval(peopleTimer);
+  if (!isDesk()) clearInterval(peopleTimer);
   convo = { mode: "dm", peer };
   messagesEl = dmMessagesEl;
   // Ownership inside this thread is decided by the peer (see dmContextPeer).
@@ -1460,7 +1516,14 @@ function paintDmTick(wrap, readMark) {
 }
 
 function markDmRead(force) {
-  if (convo.mode !== "dm" || !socket || socket.readyState !== 1) return;
+  if (convo.mode !== "dm") return;
+  if (dmUnreadMap[convo.peer]) {
+    delete dmUnreadMap[convo.peer];
+    saveDmUnread();
+    updateBackBadge();
+    refreshListView();
+  }
+  if (!socket || socket.readyState !== 1) return;
   const now = Date.now();
   if (!force && now - dmReadSentAt < 1500) return;
   dmReadSentAt = now;
@@ -1550,9 +1613,11 @@ function handleDm(m) {
   } else if (host) {
     withMsgHost(host, () => addMessageDom(m));
   }
+  const viewingNow = active && document.visibilityState !== "hidden" && isNearBottom();
   if (!mine) {
     if (!active) playNotify();
-    bumpDmUnread(peer, m);
+    if (viewingNow) updateDmThreadPreview(peer, m);
+    else bumpDmUnread(peer, m);
   } else updateDmThreadPreview(peer, m);
 }
 
@@ -1605,6 +1670,7 @@ function applyLayoutMode() {
   // row and look like an empty chat list, so it always starts empty.
   peopleSearchInput.value = "";
   filterUserTyped = false;
+  peopleSearchInput.readOnly = true;
   // Autofill lands a moment after load, so wipe it again once the dust settles.
   setTimeout(sanitizeFilter, 1200);
   document.body.classList.toggle("desk", desk);
@@ -1620,6 +1686,7 @@ function applyLayoutMode() {
     if (peopleOpen) startPeopleTimer();
   }
   refreshListView();
+  requestAnimationFrame(() => syncFolderIndicator(false));
 }
 deskMQ.addEventListener("change", applyLayoutMode);
 
@@ -1639,7 +1706,11 @@ backBtn.addEventListener("click", () => {
   openPeople();
 });
 peopleSearchInput.addEventListener("input", () => {
-  if (document.activeElement === peopleSearchInput) filterUserTyped = true;
+  if (document.activeElement === peopleSearchInput && !peopleSearchInput.readOnly) {
+    filterUserTyped = true;
+  } else if (!filterUserTyped) {
+    peopleSearchInput.value = "";
+  }
   renderPeopleList();
 });
 dmDelCancelBtn.addEventListener("click", () => { dmDelModal.classList.add("hide"); dmDelTarget = ""; });
@@ -3866,7 +3937,7 @@ async function openMonitorThread(t) {
   if (selectionMode) endSelection();
   leaveDm();
   peopleOpen = false;
-  clearInterval(peopleTimer);
+  if (!isDesk()) clearInterval(peopleTimer);
   monitorPair = { a: t.a, b: t.b };
   monitorMsgs = [];
   convo = { mode: "monitor", peer: "" };
@@ -4920,8 +4991,13 @@ function handleMessage(m) {
     }
     if (m.t === "chat" || m.t === "img" || m.t === "voice") stopTyping(m.from);
     if (m.t === "chat" || m.t === "img" || m.t === "voice") {
-      if (!atRoom) { updateScrollBtn(); }
-      else if (mine) {
+      if (!atRoom) {
+        if (!mine) {
+          unreadCount++;
+          ensureUnreadBanner(wrap);
+        }
+        updateScrollBtn();
+      } else if (mine) {
         scrollBottom();
         if (wasNearBottom) clearUnreadState();
       } else if (wasNearBottom) {
@@ -6094,6 +6170,7 @@ function connect() {  // Exactly one live socket at a time. A reconnect replaces
     } else if (!historySoftRejoin) {
       scrollBottom(true);
     }
+    refreshListView();
     historySoftRejoin = false;
     if (interactionReady()) msgInput.focus();
   });
