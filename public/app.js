@@ -652,6 +652,52 @@ for (const scroller of [roomScrollCtn, dmScrollEl, monitorScrollEl]) {
 const peopleScreen = document.getElementById("peopleScreen");
 const peopleListEl = document.getElementById("peopleList");
 const peopleSearchInput = document.getElementById("convoFilter");
+const peopleMenuBtn = document.getElementById("peopleMenuBtn");
+const chatFoldersEl = document.getElementById("chatFolders");
+const cfBadgeAll = document.getElementById("cfBadgeAll");
+const cfBadgePersonal = document.getElementById("cfBadgePersonal");
+const cfBadgeImportant = document.getElementById("cfBadgeImportant");
+const chatListPromo = document.getElementById("chatListPromo");
+const chatPromoClose = document.getElementById("chatPromoClose");
+const PROMO_DISMISS_KEY = "tgChatPromoDismiss_" + (window.generatorName || "chat");
+let activeFolder = "all";
+let chatPromoDismissed = lsGet(PROMO_DISMISS_KEY) === "1";
+
+function syncChatPromo() {
+  if (!chatListPromo) return;
+  const hasPhoto = !!(myName && pfpFor(myName));
+  chatListPromo.classList.toggle("hide", chatPromoDismissed || hasPhoto);
+}
+if (chatPromoClose) {
+  chatPromoClose.addEventListener("click", (e) => {
+    e.stopPropagation();
+    chatPromoDismissed = true;
+    lsSet(PROMO_DISMISS_KEY, "1");
+    syncChatPromo();
+  });
+}
+if (chatListPromo) {
+  const openProfileFromPromo = () => { if (nickItem) nickItem.click(); };
+  chatListPromo.addEventListener("click", openProfileFromPromo);
+  chatListPromo.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProfileFromPromo(); }
+  });
+}
+if (chatFoldersEl) {
+  chatFoldersEl.querySelectorAll(".cfTab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const f = tab.dataset.folder || "all";
+      if (f === activeFolder) return;
+      activeFolder = f;
+      chatFoldersEl.querySelectorAll(".cfTab").forEach((t) => {
+        const on = (t.dataset.folder || "all") === activeFolder;
+        t.classList.toggle("active", on);
+        t.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      renderPeopleList();
+    });
+  });
+}
 /* Browsers insist on autofilling this box (with our own nickname, no less), and
    they do it by replaying a *trusted* focus/keydown/input sequence at load -
    which would silently filter the list down to nothing. The one thing autofill
@@ -667,7 +713,6 @@ const dmDelOkBtn = document.getElementById("dmDelOkBtn");
 const dmDelCancelBtn = document.getElementById("dmDelCancelBtn");
 const peopleTitleEl = document.getElementById("peopleTitle");
 const peopleSubEl = document.getElementById("peopleSub");
-let peopleFolder = "all";
 
 /* Wide screens get the desktop messenger layout instead of the phone one: the
    conversation list is a permanent left column, so there is no "back" to click -
@@ -689,7 +734,11 @@ function canDm(name) { return !!name && name !== myName && (name === "admin" || 
 // lives in exactly one place.
 function refreshListView() { if (peopleOpen || isDesk()) renderPeopleList(); }
 // ...and the same for the People/private-chat screen being on screen at all.
-function setPeopleScreenVisible(v) { peopleScreen.classList.toggle("hide", !v && !isDesk()); }
+function setPeopleScreenVisible(v) {
+  const show = !!v || isDesk();
+  peopleScreen.classList.toggle("hide", !show);
+  appHost.classList.toggle("peopleMode", !!v && !isDesk());
+}
 
 function startPeopleTimer() { clearInterval(peopleTimer); peopleTimer = setInterval(refreshPeople, 5000); }
 
@@ -901,6 +950,25 @@ function fmtTimeShort(ts) {
 // The verification tick, drawn once and reused by the list's verify button and
 // by the selection toolbar's.
 const VERIFY_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9" fill="currentColor" stroke="none" opacity="0.16"/><path d="M8 12.5l3 3 5.5-5.5"/></svg>';
+const LIST_PIN_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M16 3l5 5-2 2-1.5-.5-3.5 3.5.5 3-1.5 1.5-3.5-3.5-4.5 4.5-1-1 4.5-4.5-3.5-3.5L6.5 9l3 .5L13 6l-.5-1.5L14 3z"/></svg>';
+const MUTE_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M11 5L6 9H3v6h3l5 4V5zm4.5 4.1l1.4-1.4L19 9.8l2.1-2.1 1.4 1.4L20.4 11.2l2.1 2.1-1.4 1.4L19 12.6l-2.1 2.1-1.4-1.4 2.1-2.1-2.1-2.1z"/></svg>';
+const ROOM_BOOKMARK_SVG = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M6.5 3.5h11a1.5 1.5 0 0 1 1.5 1.5v15.4a.6.6 0 0 1-.96.48L12 16.4l-6.04 4.48A.6.6 0 0 1 5 20.4V5a1.5 1.5 0 0 1 1.5-1.5z"/></svg>';
+
+function isSoundMuted() {
+  try { return !soundOn; } catch (e) { return lsGet("tgSound_" + (window.generatorName || "chat")) === "off"; }
+}
+function buildPreviewEl(sender, text) {
+  const prev = el("div", "pPreview");
+  if (sender) prev.appendChild(el("span", "pSender", sender + ":"));
+  prev.appendChild(el("span", "pPreviewText", text || ""));
+  return prev;
+}
+function setFolderBadge(node, count) {
+  if (!node) return;
+  const n = Math.max(0, Number(count) || 0);
+  node.textContent = n > 999 ? "999+" : String(n);
+  node.classList.toggle("hide", n === 0);
+}
 
 /* The admin's one place to hand out verification: people who are online but
    not verified yet. These are deliberately NOT conversation rows - tapping one
@@ -917,7 +985,9 @@ function pendingRow(peer) {
   const top = el("div", "pTop");
   top.appendChild(el("span", "pName", peer));
   main.appendChild(top);
-  main.appendChild(el("div", "pPreview", "online \u00b7 not verified"));
+  const bottom = el("div", "pBottom");
+  bottom.appendChild(buildPreviewEl("", "online \u00b7 not verified"));
+  main.appendChild(bottom);
   row.appendChild(main);
   const ok = el("button", "pAct");
   ok.type = "button";
@@ -955,6 +1025,11 @@ function personRow(peer, info) {
   if (senderIsBanned(peer)) top.appendChild(el("span", "bannedChip", "banned"));
   if (peer === "admin") top.appendChild(el("span", "olTag", "ADMIN"));
   else if (verifiedSet.has(peer)) top.appendChild(verifiedBadgeEl());
+  if (isSoundMuted()) {
+    const mute = el("span", "pMuteIco");
+    mute.innerHTML = MUTE_SVG;
+    top.appendChild(mute);
+  }
   const unread = Number(dmUnreadMap[peer]) || 0;
   if (unread) row.classList.add("hasUnread");
   if (info && info.ts) {
@@ -968,13 +1043,17 @@ function personRow(peer, info) {
     top.appendChild(meta);
   }
   main.appendChild(top);
+  const bottom = el("div", "pBottom");
   const hasText = info && info.preview;
-  const label = hasText
-    ? ((info.from === myName ? "You: " : "") + info.preview)
-    : (onlineNames.has(peer) ? "online" : "offline");
-  main.appendChild(el("div", "pPreview", label));
+  if (hasText) {
+    const senderLabel = info.from === myName ? "You" : (info.from || "");
+    bottom.appendChild(buildPreviewEl(senderLabel, info.preview));
+  } else {
+    bottom.appendChild(buildPreviewEl("", onlineNames.has(peer) ? "online" : "offline"));
+  }
+  if (unread) bottom.appendChild(el("span", "pBadge", unread > 99 ? "99+" : String(unread)));
+  main.appendChild(bottom);
   row.appendChild(main);
-  if (unread) row.appendChild(el("span", "pBadge", unread > 99 ? "99+" : String(unread)));
   // view-as eye removed per privacy terms
   const del = el("button", "pDel");
   del.type = "button";
@@ -987,42 +1066,62 @@ function personRow(peer, info) {
   return row;
 }
 
-/* The room's row in the desktop list: same shape as a person row, but it is not
-   a conversation with somebody - clicking it just brings the room back into the
-   pane beside the list. Its preview is read straight off the room's DOM, which
-   is always current (the room keeps rendering behind a private chat). */
+/* The room's row in the chat list: pinned at the top like Telegram's Saved
+   Messages card on both PC and mobile. Clicking it opens the main group chat. */
 function roomRow() {
   const row = el("div", "pRow roomRow");
   row.dataset.room = "1";
-  if (convo.mode === "room") row.classList.add("active");
+  if (convo.mode === "room" && !peopleOpen) row.classList.add("active");
+  else if (convo.mode === "room" && isDesk()) row.classList.add("active");
   const av = el("div", "pAvatar roomAv");
   if (currentIconUrl) {
     const img = el("img", "avImg");
     img.src = currentIconUrl;
     av.appendChild(img);
-  } else av.appendChild(el("span", null, (roomTitleText.trim().charAt(0) || "C").toUpperCase()));
+  } else {
+    av.innerHTML = ROOM_BOOKMARK_SVG;
+  }
   row.appendChild(av);
   const main = el("div", "pMain");
   const top = el("div", "pTop");
   top.appendChild(el("span", "pName", roomTitleText));
+  if (isSoundMuted()) {
+    const mute = el("span", "pMuteIco");
+    mute.innerHTML = MUTE_SVG;
+    top.appendChild(mute);
+  }
   const last = roomLastMsg();
-  if (last.ts) top.appendChild(el("span", "pTime", fmtTimeShort(last.ts)));
+  if (last.ts) {
+    const meta = el("span", "pMeta");
+    meta.appendChild(el("span", "pTime", fmtTimeShort(last.ts)));
+    top.appendChild(meta);
+  }
   main.appendChild(top);
-  main.appendChild(el("div", "pPreview", last.text || "No messages yet"));
+  const bottom = el("div", "pBottom");
+  bottom.appendChild(buildPreviewEl(last.sender, last.text || (onlineCount ? (onlineCount === 1 ? "1 online" : onlineCount + " online") : "No messages yet")));
+  if (unreadCount) {
+    row.classList.add("hasUnread", "unreadAccent");
+    bottom.appendChild(el("span", "pBadge", unreadCount > 99 ? "99+" : String(unreadCount)));
+  } else {
+    const pin = el("span", "pPin");
+    pin.innerHTML = LIST_PIN_SVG;
+    bottom.appendChild(pin);
+  }
+  main.appendChild(bottom);
   row.appendChild(main);
-  if (unreadCount) { row.classList.add("hasUnread"); row.appendChild(el("span", "pBadge", unreadCount > 99 ? "99+" : String(unreadCount))); }
   row.addEventListener("click", () => showRoom());
   return row;
 }
 function roomLastMsg() {
   let n = roomMessagesEl.lastElementChild;
   while (n && !(n.classList && n.classList.contains("msg"))) n = n.previousElementSibling;
-  if (!n) return { text: "", ts: 0 };
+  if (!n) return { sender: "", text: "", ts: 0 };
   const from = n.dataset.from || "";
   const text = n.querySelector(".imgBubble") ? "Photo"
     : n.querySelector(".voiceBubble") ? "Voice message"
     : ((n.querySelector(".btext") || {}).textContent || "");
-  return { text: (from && from !== myName ? from + ": " : from === myName ? "You: " : "") + text, ts: Number(n.dataset.ts) || 0 };
+  const sender = from && from !== myName ? from : (from === myName ? "You" : "");
+  return { sender, text, ts: Number(n.dataset.ts) || 0 };
 }
 
 /* A row for somebody else's private conversation, shown to the admin only. It
@@ -1040,10 +1139,15 @@ function adminThreadRow(t) {
   const top = el("div", "pTop");
   top.appendChild(el("span", "pName", t.a + " \u00b7 " + t.b));
   top.appendChild(el("span", "pMonitorTag", "private"));
-  if (t.ts) top.appendChild(el("span", "pTime", fmtTimeShort(t.ts)));
+  if (t.ts) {
+    const meta = el("span", "pMeta");
+    meta.appendChild(el("span", "pTime", fmtTimeShort(t.ts)));
+    top.appendChild(meta);
+  }
   main.appendChild(top);
-  const last = t.preview ? (t.from ? t.from + ": " + t.preview : t.preview) : "No messages yet";
-  main.appendChild(el("div", "pPreview", last));
+  const bottom = el("div", "pBottom");
+  bottom.appendChild(buildPreviewEl(t.preview && t.from ? t.from : "", t.preview || "No messages yet"));
+  main.appendChild(bottom);
   row.appendChild(main);
   row.addEventListener("click", () => openMonitorThread({ a: t.a, b: t.b }));
   return row;
@@ -1054,6 +1158,7 @@ function sanitizeFilter() {
 }
 function renderPeopleList() {
   sanitizeFilter();
+  syncChatPromo();
   peopleHead.classList.remove("hide");
   const q = filterUserTyped ? peopleSearchInput.value.trim().toLowerCase() : "";
   const byPeer = new Map(dmThreads.map((t) => [t.peer, t]));
@@ -1062,8 +1167,9 @@ function renderPeopleList() {
   for (const n of onlineNames) names.add(n);
   names.delete(myName);
   // Only verified people appear - and only they can be chatted with privately.
+  const allDmCandidates = [...names].filter(canDm);
   const match = (n) => !q || n.toLowerCase().indexOf(q) !== -1;
-  const shown = [...names].filter(canDm).filter(match);
+  const shown = allDmCandidates.filter(match);
   const chats = shown.filter((n) => byPeer.has(n)).sort((a, b) => (Number(byPeer.get(b).ts) || 0) - (Number(byPeer.get(a).ts) || 0));
   const fresh = shown.filter((n) => !byPeer.has(n) && onlineNames.has(n)).sort((a, b) => a.localeCompare(b));
   // The admin also gets to see who is waiting to be verified - the only place
@@ -1071,11 +1177,22 @@ function renderPeopleList() {
   const pending = isAdmin() ? [...names].filter((n) => onlineNames.has(n) && !canDm(n)).filter(match).sort((a, b) => a.localeCompare(b)) : [];
   // Every *other* pair's private conversation, so the admin can read and
   // moderate it from the chat list itself instead of only from the admin panel.
-  // Pairs the admin is part of are already ordinary chat rows above, so they
-  // are left out here: this section is strictly other people's conversations.
   const monitored = isAdmin()
     ? adminDmThreads.filter((t) => t && t.a && t.b && t.a !== myName && t.b !== myName && (match(t.a) || match(t.b)))
     : [];
+
+  // Update live folder tab counts (real data, never hardcoded).
+  const allowed = dmAllowed();
+  const totalPersonal = allowed ? allDmCandidates.filter((n) => byPeer.has(n) || onlineNames.has(n)).length : 0;
+  const importantPeers = allowed
+    ? allDmCandidates.filter((n) => (Number(dmUnreadMap[n]) || 0) > 0 || n === "admin")
+    : [];
+  const totalAll = 1 + totalPersonal + (isAdmin() ? adminDmThreads.filter((t) => t && t.a && t.b && t.a !== myName && t.b !== myName).length : 0);
+  const totalImportant = 1 + importantPeers.length;
+  setFolderBadge(cfBadgeAll, totalAll);
+  setFolderBadge(cfBadgePersonal, totalPersonal);
+  setFolderBadge(cfBadgeImportant, totalImportant);
+
   peopleListEl.textContent = "";
   // The admin's "view as" session replaces the whole list with that person's
   // conversations, so the eye icon really does put the admin in their shoes.
@@ -1085,8 +1202,6 @@ function renderPeopleList() {
     renderViewAsList();
     return;
   }
-  const showRoom = peopleFolder !== "chats";
-  const showChats = peopleFolder !== "groups";
   if (isDesk()) {
     peopleTitleEl.textContent = "Chats";
     peopleSubEl.textContent = onlineCount === 1 ? "1 online" : onlineCount + " online";
@@ -1094,38 +1209,64 @@ function renderPeopleList() {
     peopleTitleEl.textContent = "People";
     peopleSubEl.textContent = "Tap someone to chat privately";
   }
-  if (showRoom && (isDesk() || peopleFolder === "groups")) {
-    peopleListEl.appendChild(el("div", "pSection", "Room"));
-    peopleListEl.appendChild(roomRow());
-  }
-  if (!showChats) return;
-  if (!dmAllowed()) {
-    peopleListEl.appendChild(el("div", "pSection", "Private chats"));
-    peopleListEl.appendChild(el("div", "pEmpty", myName ? "Private chat is for verified users only." : "Connecting…"));
+
+  const roomMatches = !q || roomTitleText.toLowerCase().indexOf(q) !== -1;
+
+  if (activeFolder === "personal") {
+    if (!allowed) {
+      peopleListEl.appendChild(el("div", "pEmpty", myName ? "Private chat is for verified users only." : "Connecting…"));
+      return;
+    }
+    for (const peer of chats) peopleListEl.appendChild(personRow(peer, byPeer.get(peer)));
+    for (const peer of fresh) peopleListEl.appendChild(personRow(peer, null));
+    if (!chats.length && !fresh.length) {
+      peopleListEl.appendChild(el("div", "pEmpty", q ? "No conversations match that search" : "No private chats yet.\nVerified people appear here when online."));
+    }
     return;
   }
-  if (chats.length) {
-    peopleListEl.appendChild(el("div", "pSection", "Chats"));
-    for (const peer of chats) peopleListEl.appendChild(personRow(peer, byPeer.get(peer)));
+
+  if (activeFolder === "important") {
+    let any = false;
+    if (roomMatches) {
+      peopleListEl.appendChild(roomRow());
+      any = true;
+    }
+    if (allowed) {
+      const impList = [...chats, ...fresh].filter((n) => (Number(dmUnreadMap[n]) || 0) > 0 || n === "admin");
+      for (const peer of impList) {
+        peopleListEl.appendChild(personRow(peer, byPeer.get(peer) || null));
+        any = true;
+      }
+    }
+    if (!any) {
+      peopleListEl.appendChild(el("div", "pEmpty", q ? "No important chats match that search" : "No important chats yet."));
+    }
+    return;
   }
-  if (fresh.length) {
-    peopleListEl.appendChild(el("div", "pSection", "Online now"));
-    for (const peer of fresh) peopleListEl.appendChild(personRow(peer, null));
+
+  // Default "all" folder: pinned Room card at top, followed seamlessly by chats
+  // and online verified contacts (matching the clean Telegram list rhythm).
+  if (roomMatches) {
+    peopleListEl.appendChild(roomRow());
   }
-  // Last, because it is the admin's tool rather than a conversation: everyone
-  // else sees nothing here, and it is gone the moment they are verified.
+  if (!allowed) {
+    if (!q) peopleListEl.appendChild(el("div", "pEmpty", myName ? "Private chats are available for verified users." : "Connecting…"));
+    else if (!roomMatches) peopleListEl.appendChild(el("div", "pEmpty", "No chats match that search"));
+    return;
+  }
+  for (const peer of chats) peopleListEl.appendChild(personRow(peer, byPeer.get(peer)));
+  for (const peer of fresh) peopleListEl.appendChild(personRow(peer, null));
+  // Admin-only moderation sections stay clearly separated below conversations.
   if (pending.length) {
     peopleListEl.appendChild(el("div", "pSection", "Not verified"));
     for (const peer of pending) peopleListEl.appendChild(pendingRow(peer));
   }
-  // The admin's moderation window into other people's private chats. Last,
-  // like the "Not verified" tool rows, and never shown to anyone else.
   if (monitored.length) {
     peopleListEl.appendChild(el("div", "pSection", "All private chats"));
     for (const t of monitored) peopleListEl.appendChild(adminThreadRow(t));
   }
-  if (!chats.length && !fresh.length && !pending.length && !monitored.length) {
-    peopleListEl.appendChild(el("div", "pEmpty", q ? "No one matches that search" : "No one else is here right now.\nPeople appear the moment they join."));
+  if (!roomMatches && !chats.length && !fresh.length && !pending.length && !monitored.length) {
+    peopleListEl.appendChild(el("div", "pEmpty", q ? "No chats match that search" : "No one else is here right now.\nPeople appear the moment they join."));
   }
 }
 
@@ -1167,7 +1308,7 @@ function openPeople() {
   peopleOpen = true;
   messagesEl = roomMessagesEl;
   scrollCtnEl = roomScrollCtn;
-  peopleScreen.classList.remove("hide");
+  setPeopleScreenVisible(true);
   roomScrollCtn.classList.add("hide");
   dmScrollEl.classList.add("hide");
   monitorScreen.classList.add("hide");
@@ -1469,6 +1610,7 @@ function applyLayoutMode() {
   document.body.classList.toggle("desk", desk);
   if (desk) {
     if (convo.mode === "people") { showRoom(); }
+    appHost.classList.remove("peopleMode");
     peopleScreen.classList.remove("hide");
     startPeopleTimer();
   } else {
@@ -1500,17 +1642,6 @@ peopleSearchInput.addEventListener("input", () => {
   if (document.activeElement === peopleSearchInput) filterUserTyped = true;
   renderPeopleList();
 });
-document.getElementById("peopleMenuBtn").addEventListener("click", () => {
-  const item = document.getElementById("nickItem");
-  if (item) item.click();
-});
-for (const btn of document.querySelectorAll(".pFolder")) {
-  btn.addEventListener("click", () => {
-    peopleFolder = btn.dataset.folder || "all";
-    for (const o of document.querySelectorAll(".pFolder")) o.classList.toggle("active", o === btn);
-    renderPeopleList();
-  });
-}
 dmDelCancelBtn.addEventListener("click", () => { dmDelModal.classList.add("hide"); dmDelTarget = ""; });
 dmDelOkBtn.addEventListener("click", async () => {
   const peer = dmDelTarget;
@@ -2100,6 +2231,7 @@ soundItem.addEventListener("click", async () => {
     lsSet(notifyKey, "off");
     updateSoundItem();
   }
+  refreshListView();
 });
 function showMessageNotification(m) {
   if (!notifyOn || !document.hidden) return;
@@ -2141,8 +2273,10 @@ function langName(code) {
 function updateTranslateItems() {}
 translateItem.addEventListener("click", (e) => {
   e.stopPropagation();
+  const fromList = menuPop.classList.contains("fromList");
   menuPop.classList.add("hide");
   textSizePop.classList.add("hide");
+  translatePop.classList.toggle("fromList", fromList);
   openTranslatePop();
 });
 
@@ -2165,8 +2299,10 @@ function applyTextSize() {
 }
 textSizeItem.addEventListener("click", (e) => {
   e.stopPropagation();
+  const fromList = menuPop.classList.contains("fromList");
   translatePop.classList.add("hide");
   menuPop.classList.add("hide");
+  textSizePop.classList.toggle("fromList", fromList);
   textSizePop.classList.toggle("hide");
 });
 textSizePop.querySelectorAll(".tsizeGrid button").forEach((b) => {
@@ -2265,6 +2401,7 @@ translateHeaderBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   menuPop.classList.add("hide");
   textSizePop.classList.add("hide");
+  translatePop.classList.remove("fromList");
   openTranslatePop();
 });
 tpopToggle.addEventListener("click", (e) => {
@@ -6786,8 +6923,22 @@ menuBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   translatePop.classList.add("hide");
   textSizePop.classList.add("hide");
+  const wasFromList = menuPop.classList.contains("fromList");
+  menuPop.classList.remove("fromList");
+  if (wasFromList && !menuPop.classList.contains("hide")) return;
   menuPop.classList.toggle("hide");
 });
+if (peopleMenuBtn) {
+  peopleMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    translatePop.classList.add("hide");
+    textSizePop.classList.add("hide");
+    const wasFromList = menuPop.classList.contains("fromList");
+    menuPop.classList.add("fromList");
+    if (!wasFromList && !menuPop.classList.contains("hide")) return;
+    menuPop.classList.toggle("hide");
+  });
+}
 document.addEventListener("click", (e) => {
   menuPop.classList.add("hide");
   translatePop.classList.add("hide");

@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "vercel dev"
+    "dev": "node server.js",
+    "build": "echo 'Build complete'",
+    "start": "node server.js",
+    "lint": "node --check server.js && node --check public/app.js && node --check public/shim.js"
   }
 }
