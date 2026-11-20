@@ -1333,6 +1333,7 @@
   #nickModal, #bannedModal { z-index: 93; }
   #regionModal { z-index: 94; }
   #vpnModal { z-index: 94; }
+  #changePassModal, #delAccModal { z-index: 95; }
   .tacCard { width: 320px; max-height: 80vh; display: flex; flex-direction: column; }
   .tacBody { overflow-y: auto; font-size: 13.5px; line-height: 1.55; color: #444; margin: 2px 0 4px; }
   .transTog {
@@ -3633,9 +3634,35 @@
   .tsClock { display: inline-flex; align-items: center; margin-left: 4px; vertical-align: -2px; color: #9db4c8; }
   body.dark .tsClock { color: #b0a2e4; }
   .msg.out .tsrow .tsClock svg { display: block; }
-  .delAccBtn { background: none; border: none; color: #e53935; font-size: 13px; margin-top: 10px; cursor: pointer; padding: 6px; }
+  .profLinks {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #eceff3;
+  }
+  body.dark .profLinks { border-top-color: #2f2f35; }
+  .changePassBtn {
+    background: none;
+    border: none;
+    color: #2678b6;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 6px 2px;
+  }
+  .changePassBtn:hover { text-decoration: underline; }
+  body.dark .changePassBtn { color: #a99bff; }
+  .delAccBtn { background: none; border: none; color: #e53935; font-size: 13px; margin-top: 0; cursor: pointer; padding: 6px 2px; }
+  .delAccBtn:hover { text-decoration: underline; }
   body.dark .delAccBtn { color: #ff7b72; }
-  #nickModal.force #delAccountBtn { display: none; }
+  #nickModal.force .profLinks,
+  #nickModal.force #delAccountBtn,
+  #nickModal.force #changePassBtn { display: none; }
+  .changePassForm { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
   .pAvatar.adminAvatar { background: linear-gradient(135deg, #d4a017, #a87900); }
   .pOnlineDot {
     position: absolute; right: 1px; bottom: 1px; width: 13px; height: 13px;
@@ -4351,7 +4378,26 @@
         <button id="nickCancelBtn" type="button">Cancel</button>
         <button id="nickOkBtn" type="button">Save</button>
       </div>
-      <button id="delAccountBtn" type="button" class="delAccBtn">Delete my account</button>
+      <div class="profLinks">
+        <button id="changePassBtn" type="button" class="changePassBtn">Change password</button>
+        <button id="delAccountBtn" type="button" class="delAccBtn">Delete my account</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="changePassModal" class="modal hide">
+    <div class="card">
+      <div class="cardTitle">Change password</div>
+      <div class="cardDesc">Enter your current password and choose a new one.</div>
+      <form class="modalForm changePassForm" autocomplete="off" onsubmit="return false">
+        <input id="cpCurrentInput" type="password" maxlength="40" placeholder="Current password" autocomplete="current-password">
+        <input id="cpNewInput" type="password" maxlength="40" placeholder="New password (min 4 characters)" autocomplete="new-password">
+        <input id="cpConfirmInput" type="password" maxlength="40" placeholder="Confirm new password" autocomplete="new-password">
+      </form>
+      <div class="cardBtns">
+        <button id="cpCancelBtn" type="button">Cancel</button>
+        <button id="cpOkBtn" type="button">Update</button>
+      </div>
     </div>
   </div>
 

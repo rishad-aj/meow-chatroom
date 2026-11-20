@@ -754,9 +754,20 @@ SupaSocket.prototype.rpc.setName = function (data) {
   }
   if (/^admin$/i.test(name)) {
     if (!pass) return Promise.resolve("password_required");
-    return fetch("/api/admin-login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pass }) }).then(function (r) { return r.json(); }).then(function (j) {
-      if (!j || !j.ok) return "wrong_password";
-      return finish(ADMIN_NAME);
+    if (attemptsHit(ADMIN_NAME)) return Promise.resolve("too_many_attempts");
+    return acctGet(ADMIN_NAME).then(function (acct) {
+      if (acct && acct.pass_hash) {
+        return hashPw(pass, ADMIN_NAME).then(function (h) {
+          if (h !== acct.pass_hash) return "wrong_password";
+          attemptsClear(ADMIN_NAME);
+          return finish(ADMIN_NAME);
+        });
+      }
+      return fetch("/api/admin-login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pass }) }).then(function (r) { return r.json(); }).then(function (j) {
+        if (!j || !j.ok) return "wrong_password";
+        attemptsClear(ADMIN_NAME);
+        return finish(ADMIN_NAME);
+      }).catch(function () { return "wrong_password"; });
     }).catch(function () { return "wrong_password"; });
   }
   var prot = protectedUser(name);
@@ -961,6 +972,88 @@ SupaSocket.prototype.rpc.deleteMyAccount = function (data) {
     }
     if (!pass) return "password_required";
     return doDelete();
+  }).catch(function () { return "db_error"; });
+};
+SupaSocket.prototype.rpc.changePassword = function (data) {
+  var self = this;
+  var o = {};
+  try { o = typeof data === "string" ? JSON.parse(data) : data; } catch (e) {}
+  var curPass = String((o && o.currentPassword) || "");
+  var newPass = String((o && o.newPassword) || "");
+  var name = String(self._myName || "").trim().slice(0, 20);
+  if (!self._named || !name || /^Guest\d{4}$/i.test(name)) return Promise.resolve("invalid");
+  if (name.toLowerCase() === DELETED_NAME.toLowerCase()) return Promise.resolve("invalid");
+  if (!newPass || newPass.length < 4 || newPass.length > 40) return Promise.resolve("weak_password");
+  if (curPass && newPass === curPass) return Promise.resolve("same_password");
+  if (attemptsHit(name)) return Promise.resolve("too_many_attempts");
+  if (/^admin$/i.test(name)) {
+    if (!curPass) return Promise.resolve("password_required");
+    return acctGet(ADMIN_NAME).then(function (acct) {
+      if (acct === null) return "db_error";
+      if (acct && acct.pass_hash) {
+        return hashPw(curPass, ADMIN_NAME).then(function (h) {
+          if (h !== acct.pass_hash) return "wrong_password";
+          return hashPw(newPass, ADMIN_NAME).then(function (nh) {
+            return acctSetHash(ADMIN_NAME, nh).then(function (okc) {
+              if (!okc) return "db_error";
+              attemptsClear(ADMIN_NAME);
+              return "ok";
+            });
+          });
+        });
+      }
+      return fetch("/api/admin-login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: curPass }) }).then(function (r) { return r.json(); }).then(function (j) {
+        if (!j || !j.ok) return "wrong_password";
+        return hashPw(newPass, ADMIN_NAME).then(function (nh) {
+          var save = acct ? acctSetHash(ADMIN_NAME, nh) : acctCreate(ADMIN_NAME, ADMIN_NAME, nh);
+          return save.then(function (okc) {
+            if (!okc) return "db_error";
+            attemptsClear(ADMIN_NAME);
+            return "ok";
+          });
+        });
+      }).catch(function () { return "wrong_password"; });
+    }).catch(function () { return "db_error"; });
+  }
+  return acctGet(name).then(function (acct) {
+    if (acct === null) return "db_error";
+    if (acct && acct.pass_hash) {
+      if (!curPass) return "password_required";
+      return hashPw(curPass, name).then(function (h) {
+        if (h !== acct.pass_hash) return "wrong_password";
+        return hashPw(newPass, name).then(function (nh) {
+          return acctSetHash(name, nh).then(function (okc) {
+            if (!okc) return "db_error";
+            attemptsClear(name);
+            return "ok";
+          });
+        });
+      });
+    }
+    if (acct) {
+      return hashPw(newPass, name).then(function (nh) {
+        return acctSetHash(name, nh).then(function (okc) {
+          if (!okc) return "db_error";
+          attemptsClear(name);
+          return "ok";
+        });
+      });
+    }
+    var prot = protectedUser(name);
+    if (prot) {
+      if (!curPass) return "password_required";
+      return hashPass(curPass, prot.salt).then(function (h) {
+        if (h !== prot.hash) return "wrong_password";
+        return hashPw(newPass, prot.name).then(function (nh) {
+          return acctCreate(prot.name, prot.name, nh).then(function (made) {
+            if (!made) return "db_error";
+            attemptsClear(name);
+            return "ok";
+          });
+        });
+      });
+    }
+    return "not_found";
   }).catch(function () { return "db_error"; });
 };
 SupaSocket.prototype.rpc.unbanUser = function (data) {
