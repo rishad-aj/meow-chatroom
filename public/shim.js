@@ -549,32 +549,111 @@ SupaSocket.prototype.send = function (str) {
   }
 };
 SupaSocket.prototype._rxKey = function (from, ts) { return String(from) + "|" + String(Number(ts) || 0); };
-SupaSocket.prototype._toggleRx = function (from, ts, emoji, id) {
+function rxUserId(name, uid) {
+  var n = String(name || "").trim();
+  if (n && !/^Guest\d{4}$/i.test(n)) return "n:" + n.toLowerCase();
+  return uid ? "u:" + uid : "";
+}
+function rxCanonicalId(id, nm) {
+  id = String(id || "");
+  if (!id) return "";
+  var known = nm && nm[id] ? String(nm[id]).trim() : "";
+  if (known && !/^Guest\d{4}$/i.test(known)) return "n:" + known.toLowerCase();
+  if (id.slice(0, 2) === "n:") return "n:" + id.slice(2).trim().toLowerCase();
+  return id;
+}
+function rxDisplayFor(rawId, cid, nm) {
+  if (nm && nm[cid]) return String(nm[cid]);
+  if (nm && nm[rawId]) return String(nm[rawId]);
+  if (cid.slice(0, 2) === "n:") return cid.slice(2);
+  return "";
+}
+function rxNormalizeMap(prev, nm, namesOut) {
+  var next = {};
+  if (!prev || typeof prev !== "object") return next;
+  // Pass 1: track the last emoji each canonical user reacted with so each user
+  // holds at most one reaction per message (collapsing legacy duplicate UIDs
+  // and multi-emoji spam).
+  var userLastEmoji = {};
+  var keys = Object.keys(prev);
+  for (var ki = 0; ki < keys.length; ki++) {
+    var k = keys[ki];
+    var arr = prev[k];
+    if (!Array.isArray(arr) || !arr.length) continue;
+    for (var i = 0; i < arr.length; i++) {
+      var cid = rxCanonicalId(arr[i], nm);
+      if (!cid) continue;
+      userLastEmoji[cid] = k;
+      if (namesOut) {
+        var dn = rxDisplayFor(arr[i], cid, nm);
+        if (dn) namesOut[cid] = dn;
+      }
+    }
+  }
+  for (var kj = 0; kj < keys.length; kj++) {
+    var em = keys[kj];
+    var src = prev[em];
+    if (!Array.isArray(src) || !src.length) continue;
+    var dedup = [], seen = {};
+    for (var j = 0; j < src.length && dedup.length < 120; j++) {
+      var c = rxCanonicalId(src[j], nm);
+      if (!c || seen[c] || userLastEmoji[c] !== em) continue;
+      seen[c] = 1;
+      dedup.push(c);
+    }
+    if (dedup.length) next[em] = dedup;
+  }
+  return next;
+}
+SupaSocket.prototype._toggleRx = function (from, ts, emoji, id, dmPeer) {
   var self = this;
   if (!from || ts == null || !isEmoji(emoji)) return Promise.resolve();
-  var who = self._myUid ? "u:" + self._myUid : "n:" + self._myName;
-  return metaGet("rx", {}).then(function (store) {
-    store = (store && typeof store === "object") ? store : {};
-    var key = self._rxKey(from, ts);
-    var e = store[key] || { f: String(from).slice(0, 20), t: Number(ts) || 0, rx: {} };
-    var prev = (e.rx && typeof e.rx === "object") ? e.rx : {};
-    var next = {}, k;
-    for (k in prev) { if (k === emoji || !prev[k] || !prev[k].length) continue; next[k] = prev[k].slice(0, 120); }
-    var list = prev[emoji] ? prev[emoji].filter(function (x) { return x !== who; }) : [];
-    if (list.length === (prev[emoji] || []).length && list.length < 120) list.push(who);
-    if (list.length) next[emoji] = list;
-    if (Object.keys(next).length) store[key] = { f: e.f, t: e.t, rx: next };
-    else delete store[key];
-    var names = {};
-    return metaGet("rxnames", {}).then(function (nm) {
-      nm = (nm && typeof nm === "object") ? nm : {};
+  if (!self._named || !self._myName || /^Guest\d{4}$/i.test(self._myName)) return Promise.resolve();
+  var who = rxUserId(self._myName, self._myUid);
+  if (!who) return Promise.resolve();
+  var myLegacyUid = self._myUid ? "u:" + self._myUid : "";
+  var run = function () {
+    return Promise.all([metaGet("rx", {}), metaGet("rxnames", {})]).then(function (res) {
+      var store = (res[0] && typeof res[0] === "object") ? res[0] : {};
+      var nm = (res[1] && typeof res[1] === "object") ? res[1] : {};
+      var key = self._rxKey(from, ts);
+      var e = store[key] || { f: String(from).slice(0, 20), t: Number(ts) || 0, rx: {} };
+      var prev = (e.rx && typeof e.rx === "object") ? e.rx : {};
+      var isMe = function (raw) {
+        var cid = rxCanonicalId(raw, nm);
+        return cid === who || (myLegacyUid && raw === myLegacyUid);
+      };
+      var hadEmoji = Array.isArray(prev[emoji]) && prev[emoji].some(isMe);
+      var names = {};
+      var cleaned = rxNormalizeMap(prev, nm, names);
+      var next = {}, k;
+      for (k in cleaned) {
+        var filtered = cleaned[k].filter(function (x) { return !isMe(x); });
+        if (filtered.length) next[k] = filtered;
+      }
+      if (!hadEmoji) {
+        var list = Array.isArray(next[emoji]) ? next[emoji].slice() : [];
+        if (list.length < 120) list.push(who);
+        if (list.length) next[emoji] = list;
+      }
+      if (Object.keys(next).length) store[key] = { f: e.f, t: e.t, rx: next };
+      else delete store[key];
       nm[who] = self._myName;
-      for (var em in next) for (var i = 0; i < next[em].length; i++) if (nm[next[em][i]]) names[next[em][i]] = nm[next[em][i]];
+      if (myLegacyUid) nm[myLegacyUid] = self._myName;
+      names[who] = self._myName;
       return metaSet("rxnames", nm).then(function () { return metaSet("rx", store); }).then(function () {
-        self._broad({ t: "react", id: id, from: from, mts: ts, rx: next, nm: names, ts: Date.now() });
+        if (dmPeer) {
+          var payload = { t: "dm", ev: "react", id: id, from: from, mts: ts, rx: next, nm: names, ts: Date.now() };
+          self._inboxSend(dmPeer, Object.assign({}, payload, { peer: self._myName }));
+          if (dmPeer !== self._myName) self._inboxSend(self._myName, Object.assign({}, payload, { peer: dmPeer }));
+        } else {
+          self._broad({ t: "react", id: id, from: from, mts: ts, rx: next, nm: names, ts: Date.now() });
+        }
       });
-    });
-  }).catch(function () {});
+    }).catch(function () {});
+  };
+  self._rxQueue = (self._rxQueue || Promise.resolve()).then(run, run);
+  return self._rxQueue;
 };
 SupaSocket.prototype._dmPairKey = function (a, b) {
   var x = a < b ? a : b, y = a < b ? b : a;
@@ -618,7 +697,7 @@ SupaSocket.prototype._dmSend = function (m) {
     return;
   }
   if (m.ev === "react") {
-    self._toggleRx(m.from || null, m.ts != null ? Number(m.ts) : (m.mts != null ? Number(m.mts) : null), String(m.emoji || ""), m.id || null).then(function () {});
+    self._toggleRx(m.from || null, m.ts != null ? Number(m.ts) : (m.mts != null ? Number(m.mts) : null), String(m.emoji || ""), m.id || null, to).then(function () {});
     return;
   }
   if (m.ev) return;
@@ -656,8 +735,8 @@ SupaSocket.prototype.rpc.getReactions = function () {
       var e = store[k];
       if (e && e.rx && Object.keys(e.rx).length) {
         var names = {};
-        for (var em in e.rx) for (var i = 0; i < e.rx[em].length; i++) if (nm[e.rx[em][i]]) names[e.rx[em][i]] = nm[e.rx[em][i]];
-        out.push({ from: e.f, ts: e.t, rx: e.rx, nm: names });
+        var cleanRx = rxNormalizeMap(e.rx, nm, names);
+        if (Object.keys(cleanRx).length) out.push({ from: e.f, ts: e.t, rx: cleanRx, nm: names });
       }
     }
     return JSON.stringify(out);

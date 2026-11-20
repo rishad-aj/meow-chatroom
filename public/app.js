@@ -2241,6 +2241,7 @@ function reclassifyOwnership() {
   // A message that only became "mine" now (nickname applied late) needs its
   // private-chat tick, which is painted from ownership rather than at build time.
   if (convo.mode === "dm") applyDmSeen();
+  if (typeof rxRefreshAll === "function") rxRefreshAll();
 }
 
 let pendingDelIds = [];
@@ -8243,7 +8244,25 @@ let rxWhoEmoji = "";
 let rxLpTimer = null, rxLpX = 0, rxLpY = 0;
 
 function rxKey(from, ts) { return String(from || "") + "|" + String(Number(ts) || 0); }
-function myRxId() { return myUid ? "u:" + myUid : "n:" + myName; }
+function myRxId() {
+  const n = String(myName || "").trim();
+  if (n && !/^Guest\d{4}$/i.test(n)) return "n:" + n.toLowerCase();
+  return myUid ? "u:" + myUid : "";
+}
+function isMyRxEntry(who) {
+  who = String(who || "");
+  if (!who) return false;
+  const me = myRxId();
+  if (me && who === me) return true;
+  const n = String(myName || "").trim().toLowerCase();
+  if (n && !/^guest\d{4}$/.test(n)) {
+    if (who.slice(0, 2) === "n:" && who.slice(2).trim().toLowerCase() === n) return true;
+    const known = rxWhoMap.get(who);
+    if (known && known.trim().toLowerCase() === n) return true;
+  }
+  if (who.slice(0, 2) === "u:" && myUids.has(who.slice(2))) return true;
+  return false;
+}
 function rxGet(from, ts) { return rxMap.get(rxKey(from, ts)) || null; }
 
 function rxRememberNames(nm) {
@@ -8264,12 +8283,10 @@ function rxIdsFor(m, emoji) {
 function rxWhoName(who) {
   who = String(who || "");
   if (!who) return "";
-  // A nickname-only identity carries its own name; a uid identity needs the
-  // server's name map, with a message they sent in this session as a fallback.
-  if (who.slice(0, 2) === "n:") return who.slice(2);
-  if (who === myRxId()) return myName || "You";
+  if (isMyRxEntry(who)) return myName || "You";
   const known = rxWhoMap.get(who);
   if (known) return known;
+  if (who.slice(0, 2) === "n:") return who.slice(2);
   const uid = who.slice(2);
   for (const mm of msgByWrap.values()) if (mm && mm.uid === uid && mm.from) return String(mm.from);
   return "Someone";
@@ -8320,11 +8337,10 @@ async function rxKvSave() {
 function rxKvNote(m) {
   const k = rxKey(m.from, m.ts);
   if (k === "|0") return;
-  const me = myRxId();
   const rx = rxMap.get(k) || {};
-  const mine = Object.keys(rx).filter((e) => Array.isArray(rx[e]) && rx[e].indexOf(me) !== -1);
+  const mine = Object.keys(rx).filter((e) => Array.isArray(rx[e]) && rx[e].some(isMyRxEntry));
   rxSaved.delete(k);
-  if (mine.length) rxSaved.set(k, mine);
+  if (mine.length) rxSaved.set(k, mine.slice(-1));
   while (rxSaved.size > RX_MAX_KEYS) rxSaved.delete(rxSaved.keys().next().value);
   rxKvSave();
 }
@@ -8347,19 +8363,23 @@ function rxKvApply(m) {
   const mine = rxSaved.get(k);
   if (!mine) return;
   const me = myRxId();
+  if (!me) return;
   const cur = Object.assign({}, rxMap.get(k) || {});
-  let touched = false;
-  for (const e of mine) {
-    const list = Array.isArray(cur[e]) ? cur[e].slice() : [];
-    if (list.indexOf(me) === -1) { list.push(me); cur[e] = list; touched = true; }
+  const alreadyHas = Object.keys(cur).some((em) => Array.isArray(cur[em]) && cur[em].some(isMyRxEntry));
+  if (alreadyHas) return;
+  const e = mine[mine.length - 1];
+  if (!e) return;
+  const list = Array.isArray(cur[e]) ? cur[e].slice() : [];
+  if (!list.some(isMyRxEntry)) {
+    list.push(me);
+    cur[e] = list;
+    rxSet(m.from, m.ts, cur);
   }
-  if (touched) rxSet(m.from, m.ts, cur);
 }
 
 // Restore everything this browser remembers, and return the reactions the
 // server's copy was missing (they get re-sent once the history has rendered).
 function rxKvRestore(srv) {
-  const me = myRxId();
   const push = [];
   for (const [k, mine] of rxSaved) {
     const i = k.lastIndexOf("|");
@@ -8367,10 +8387,12 @@ function rxKvRestore(srv) {
     const from = k.slice(0, i);
     const ts = Number(k.slice(i + 1)) || 0;
     if (!from || !ts) continue;
-    rxKvApply({ from, ts });
     const before = (srv && srv.get(k)) || {};
-    const emojis = mine.filter((e) => !(Array.isArray(before[e]) && before[e].indexOf(me) !== -1));
-    if (emojis.length) push.push({ from, ts, emojis });
+    const alreadyOnSrv = Object.keys(before).some((em) => Array.isArray(before[em]) && before[em].some(isMyRxEntry));
+    if (alreadyOnSrv) continue;
+    rxKvApply({ from, ts });
+    const lastEmoji = mine[mine.length - 1];
+    if (lastEmoji) push.push({ from, ts, emojis: [lastEmoji] });
   }
   return push;
 }
@@ -8515,10 +8537,9 @@ function rxRender(bubble, m) {
     bubble.appendChild(row);
   }
   row.textContent = "";
-  const me = myRxId();
   for (const e of keys) {
     const ids = rx[e];
-    const mineReaction = ids.indexOf(me) !== -1;
+    const mineReaction = ids.some(isMyRxEntry);
     const pill = document.createElement("button");
     pill.type = "button";
     pill.className = "rxPill" + (mineReaction ? " mine" : "");
@@ -8632,9 +8653,8 @@ function fillReactionWho(pill, ids) {
   rxWhoEmojiEl.textContent = rxWhoEmoji;
   rxWhoCountEl.textContent = ids.length === 1 ? "1 reaction" : ids.length + " reactions";
   rxWhoListEl.textContent = "";
-  const me = myRxId();
   for (const who of ids) {
-    const mine = who === me;
+    const mine = isMyRxEntry(who);
     const name = rxWhoName(who);
     const row = el("div", "rxWhoRow" + (mine ? " rxWhoMe" : ""));
     const ava = el("span", "rxWhoAva");
@@ -8686,23 +8706,45 @@ function rxApply(ref) {
   }
 }
 
+function rxRefreshAll() {
+  for (const [w, mm] of msgByWrap) {
+    if (!mm) continue;
+    const bubble = w.querySelector(".bubble");
+    if (bubble) rxRender(bubble, mm);
+  }
+  if (rxWhoOpen()) refreshReactionWho(rxWhoPill && rxWhoPill.closest(".bubble"));
+}
+
 function toggleReaction(m, emoji) {
   if (!m || !interactionReady()) return;
   if (!socket || socket.readyState !== 1) { toast("Not connected yet — try again in a moment"); return; }
   const me = myRxId();
-  const rx = Object.assign({}, rxGet(m.from, m.ts));
-  const list = Array.isArray(rx[emoji]) ? rx[emoji].slice() : [];
-  const i = list.indexOf(me);
-  if (i === -1) list.push(me); else list.splice(i, 1);
-  if (list.length) rx[emoji] = list; else delete rx[emoji];
+  if (!me) return;
+  const prev = rxGet(m.from, m.ts) || {};
+  const hadEmoji = Array.isArray(prev[emoji]) && prev[emoji].some(isMyRxEntry);
+  const rx = {};
+  for (const k of Object.keys(prev)) {
+    if (!Array.isArray(prev[k])) continue;
+    const filtered = prev[k].filter((x) => !isMyRxEntry(x));
+    if (filtered.length) rx[k] = filtered;
+  }
+  if (!hadEmoji) {
+    const list = Array.isArray(rx[emoji]) ? rx[emoji].slice() : [];
+    list.push(me);
+    rx[emoji] = list;
+  }
+  if (myName) rxRememberNames({ [me]: myName });
   rxSet(m.from, m.ts, rx);
   rxKvNote(m);
   rxApply(m);
   if (navigator.vibrate) navigator.vibrate(8);
   // A private reaction is aimed at the thread's two participants instead of the
   // room, so nothing about it is broadcast to everyone else.
-  if (convo.mode === "dm") dmSend({ ev: "react", id: m.id || null, emoji });
-  else socket.send(JSON.stringify({ t: "react", id: m.id || null, from: m.from || null, ts: m.ts || null, emoji }));
+  if (convo.mode === "dm") {
+    dmSend({ ev: "react", id: m.id || null, from: m.from || null, ts: m.ts != null ? Number(m.ts) : null, emoji });
+  } else {
+    socket.send(JSON.stringify({ t: "react", id: m.id || null, from: m.from || null, ts: m.ts != null ? Number(m.ts) : null, emoji }));
+  }
 }
 
 async function loadReactions() {
