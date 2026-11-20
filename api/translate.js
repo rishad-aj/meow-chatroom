@@ -1,14 +1,14 @@
 /* Google Translate proxy (no API key needed) with MyMemory fallback.
-   POST { texts: string[], target: "es" } -> { translations: string[] }
+   POST { texts: string[], target: "es" } -> { translations: string[], sameLang: boolean[] }
    Also accepts { text, target }. GET ?text=..&target=.. for quick tests.
-   Vercel datacenter IPs are often blocked by translate.googleapis.com,
-   which used to make this return the input unchanged (client showed
-   "Translating..." then nothing). Now: Google first, MyMemory second. */
+   Google first (with detected source language check), MyMemory fallback when
+   Google fails or echoes foreign text unchanged. */
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") { res.status(200).end(); return; }
+
   var texts = [];
   var target = "en";
   try {
@@ -24,17 +24,43 @@ module.exports = async function handler(req, res) {
       if (body.target) target = String(body.target);
     }
   } catch (e) {}
-  target = (target || "en").toLowerCase().slice(0, 8);
-  texts = texts.slice(0, 12).map(function (t) { return String(t).slice(0, 500); });
-  if (!texts.length) { res.status(200).json({ translations: [] }); return; }
-  var TARGET_MAP = { zh: "zh-CN", fil: "tl", tl: "tl", iw: "he", he: "he", "zh-cn": "zh-CN" };
-  function mmTarget(tg) {
-    tg = String(tg || "en").toLowerCase();
+
+  var TARGET_MAP = {
+    zh: "zh-CN",
+    "zh-cn": "zh-CN",
+    "zh-tw": "zh-TW",
+    fil: "tl",
+    tl: "tl",
+    iw: "he",
+    he: "he"
+  };
+
+  function normTarget(tg) {
+    tg = String(tg || "en").trim().toLowerCase().slice(0, 10);
     if (TARGET_MAP[tg]) return TARGET_MAP[tg];
-    return tg.split("-")[0];
+    return tg || "en";
   }
+
+  function baseLang(code) {
+    var c = String(code || "").trim().toLowerCase();
+    if (c === "iw") return "he";
+    if (c === "fil") return "tl";
+    return c.split("-")[0];
+  }
+
+  function normCompare(s) {
+    return String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
+  }
+
+  target = normTarget(target);
+  texts = texts.slice(0, 20).map(function (t) { return String(t).slice(0, 600); });
+  if (!texts.length) {
+    res.status(200).json({ translations: [], sameLang: [] });
+    return;
+  }
+
   async function viaGoogle(t, tg) {
-    if (!t.trim()) return "";
+    if (!t.trim()) return { text: "", srcLang: "" };
     var u = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=" + encodeURIComponent(tg) + "&dt=t&q=" + encodeURIComponent(t);
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
@@ -46,21 +72,28 @@ module.exports = async function handler(req, res) {
         if (!r.ok) throw new Error("gtx " + r.status);
         var j = await r.json();
         var s = "";
-        if (j && j[0]) for (var i = 0; i < j[0].length; i++) s += j[0][i][0] || "";
+        if (j && Array.isArray(j[0])) {
+          for (var i = 0; i < j[0].length; i++) {
+            if (j[0][i] && j[0][i][0]) s += j[0][i][0];
+          }
+        }
+        var srcLang = (j && typeof j[2] === "string") ? j[2] : "";
         s = String(s || "").trim();
-        if (s) return s;
+        if (s) return { text: s, srcLang: srcLang };
         throw new Error("empty");
       } catch (e) {
         if (attempt === 1) throw e;
-        await new Promise(function (res2) { setTimeout(res2, 300); });
+        await new Promise(function (res2) { setTimeout(res2, 250); });
       }
     }
-    return "";
+    return { text: "", srcLang: "" };
   }
+
   async function viaMyMemory(t, tg) {
     if (!t.trim()) return "";
     try {
-      var u = "https://api.mymemory.translated.net/get?q=" + encodeURIComponent(t.slice(0, 450)) + "&langpair=autodetect%7C" + encodeURIComponent(mmTarget(tg));
+      var mmTg = tg === "zh-CN" ? "zh-CN" : baseLang(tg);
+      var u = "https://api.mymemory.translated.net/get?q=" + encodeURIComponent(t.slice(0, 450)) + "&langpair=autodetect%7C" + encodeURIComponent(mmTg);
       var ctrl = new AbortController();
       var timer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 7000);
       var r;
@@ -68,26 +101,63 @@ module.exports = async function handler(req, res) {
       finally { clearTimeout(timer); }
       if (!r.ok) return "";
       var j = await r.json();
+      if (j && Number(j.responseStatus) && Number(j.responseStatus) !== 200) return "";
       var s = j && j.responseData && String(j.responseData.translatedText || "").trim();
       if (!s) return "";
-      if (/invalid|quota|example:/i.test(s) && s.length > 60) return "";
+      if (/invalid|quota|mymemory warning|please select two distinct/i.test(s)) return "";
       return s;
     } catch (e) { return ""; }
   }
+
   async function one(t) {
-    if (!t.trim()) return t;
-    var g = "";
-    try { g = await viaGoogle(t, target); } catch (e) { g = ""; }
-    if (g && g.toLowerCase() !== t.trim().toLowerCase()) return g;
-    if (g && g.trim()) return g;
-    var m = await viaMyMemory(t, target);
-    if (m && m.trim()) return m;
-    return g || t;
+    var trimmed = String(t || "").trim();
+    if (!trimmed) return { text: t, sameLang: true };
+
+    var g = null;
+    try { g = await viaGoogle(trimmed, target); } catch (e) { g = null; }
+
+    if (g && g.text) {
+      var detectedSame = !!(g.srcLang && baseLang(g.srcLang) === baseLang(target));
+      if (normCompare(g.text) !== normCompare(trimmed)) {
+        return { text: g.text, sameLang: false };
+      }
+      if (detectedSame) {
+        return { text: trimmed, sameLang: true };
+      }
+    }
+
+    var m = await viaMyMemory(trimmed, target);
+    if (m && m.trim()) {
+      var mSame = normCompare(m) === normCompare(trimmed);
+      return { text: m.trim(), sameLang: mSame };
+    }
+
+    if (g && g.text) {
+      return { text: g.text, sameLang: normCompare(g.text) === normCompare(trimmed) };
+    }
+    return { text: trimmed, sameLang: false };
   }
-  var out = [];
-  for (var i = 0; i < texts.length; i++) {
-    out.push(await one(texts[i]));
-    if (i < texts.length - 1) await new Promise(function (r) { setTimeout(r, 120); });
+
+  var out = new Array(texts.length);
+  var sameLang = new Array(texts.length);
+  var nextIdx = 0;
+  var CONCURRENCY = Math.min(3, texts.length);
+
+  async function worker() {
+    while (nextIdx < texts.length) {
+      var idx = nextIdx++;
+      var r = await one(texts[idx]);
+      out[idx] = r.text;
+      sameLang[idx] = !!r.sameLang;
+      if (nextIdx < texts.length) {
+        await new Promise(function (resolve) { setTimeout(resolve, 60); });
+      }
+    }
   }
-  res.status(200).json({ translations: out });
+
+  var workers = [];
+  for (var w = 0; w < CONCURRENCY; w++) workers.push(worker());
+  await Promise.all(workers);
+
+  res.status(200).json({ translations: out, sameLang: sameLang });
 };

@@ -250,11 +250,14 @@ let onlineTimer = null;
 let currentIconUrl = "";
 function applyIcon(url) {
   currentIconUrl = url || "";
-  avatar.style.backgroundImage = url ? "url('" + url + "')" : "";
-  avatar.style.backgroundSize = url ? "cover" : "";
-  avatar.style.backgroundPosition = url ? "center" : "";
-  avatar.style.color = url ? "transparent" : "";
-  avatar.classList.toggle("hasPfp", !!url);
+  if (convo.mode !== "room") return;
+  avatar.style.background = "";
+  avatar.style.backgroundImage = currentIconUrl ? 'url("' + currentIconUrl.replace(/"/g, '\\"') + '")' : "";
+  avatar.style.backgroundSize = currentIconUrl ? "cover" : "";
+  avatar.style.backgroundPosition = currentIconUrl ? "center" : "";
+  avatar.style.backgroundRepeat = currentIconUrl ? "no-repeat" : "";
+  avatar.style.color = currentIconUrl ? "transparent" : "";
+  avatar.classList.toggle("hasPfp", !!currentIconUrl);
 }
 avatar.addEventListener("click", (e) => {
   // In a private chat the header avatar is the other person, not the group.
@@ -327,8 +330,40 @@ function savePfpMap() {
   try { lsSet(PFP_LC_KEY, JSON.stringify(pfpMap)); } catch (e) {}
 }
 function pfpFor(name) {
-  const u = name ? pfpMap[name] : "";
-  return typeof u === "string" ? u : "";
+  if (!name) return "";
+  const direct = pfpMap[name];
+  if (typeof direct === "string" && direct) return direct;
+  const low = String(name).toLowerCase();
+  for (const k of Object.keys(pfpMap)) {
+    if (k.toLowerCase() === low && typeof pfpMap[k] === "string" && pfpMap[k]) return pfpMap[k];
+  }
+  return "";
+}
+let _lastPfpSyncAt = 0;
+let _pfpSyncInFlight = null;
+function syncPfpsFromServer(force) {
+  if (!socket || socket.readyState !== 1 || !socket.rpc || !socket.rpc.getPfps) return Promise.resolve();
+  const now = Date.now();
+  if (!force && now - _lastPfpSyncAt < 15000) return Promise.resolve();
+  if (_pfpSyncInFlight) return _pfpSyncInFlight;
+  _lastPfpSyncAt = now;
+  _pfpSyncInFlight = Promise.resolve().then(async () => {
+    try {
+      const pf = JSON.parse(await socket.rpc.getPfps(""));
+      if (pf && typeof pf === "object") {
+        let changed = false;
+        for (const k of Object.keys(pf)) {
+          const u = String(pf[k] || "");
+          if (k && u && pfpMap[k] !== u) { pfpMap[k] = u; changed = true; }
+        }
+        if (changed) {
+          savePfpMap();
+          refreshAvatars();
+        }
+      }
+    } catch (e) {}
+  }).finally(() => { _pfpSyncInFlight = null; });
+  return _pfpSyncInFlight;
 }
 function setPfpLocal(name, url) {
   if (!name) return;
@@ -363,13 +398,15 @@ function paintAvatar(node, name) {
   }
 }
 /* Re-paint every avatar that is currently on screen after the map changes:
-   message gutters, the typing bubble, the online/info panels and the
-   who-reacted popover. */
+   message gutters, the open DM header, the chat list, the typing bubble,
+   the online/info panels and the who-reacted popover. */
 function refreshAvatars() {
   // Every container, including the private chats sitting off-screen, so a
   // picture that arrives late repaints wherever that person appears.
   for (const host of msgContainers()) for (const av of host.querySelectorAll(".msgAvatar")) delete av.dataset.k;
   updateBubbleTails();
+  if (convo.mode === "dm") applyHeader();
+  try { refreshListView(); } catch (e) {}
   if (document.getElementById("typingRow")) renderTypingBubble();
   if (!onlineModal.classList.contains("hide")) renderOnlineList();
   try {
@@ -951,12 +988,13 @@ function applyHeader() {
     const peer = convo.peer;
     chatTitle.textContent = peer;
     const url = pfpFor(peer);
-    avatar.style.backgroundImage = url ? "url('" + url + "')" : "";
+    avatar.style.background = avatarBg(peer);
+    avatar.style.backgroundImage = url ? 'url("' + url.replace(/"/g, '\\"') + '")' : "";
     avatar.style.backgroundSize = url ? "cover" : "";
     avatar.style.backgroundPosition = url ? "center" : "";
+    avatar.style.backgroundRepeat = url ? "no-repeat" : "";
     avatar.style.color = url ? "transparent" : "";
     avatar.classList.toggle("hasPfp", !!url);
-    avatar.style.background = url ? "" : avatarBg(peer);
     avatarLetter.classList.remove("hasGhost");
     if (url) { avatarLetter.textContent = ""; }
     else if (isDeletedName(peer)) { avatarLetter.textContent = ""; paintGhost(avatarLetter); }
@@ -972,9 +1010,11 @@ function applyHeader() {
     // no profile to show and nothing of the admin's own to edit.
     const p = monitorPair;
     chatTitle.textContent = p ? p.a + " \u00b7 " + p.b : "Private chat";
+    avatar.style.background = "";
     avatar.style.backgroundImage = "";
     avatar.style.backgroundSize = "";
     avatar.style.backgroundPosition = "";
+    avatar.style.backgroundRepeat = "";
     avatar.style.color = "";
     avatar.classList.toggle("hasPfp", false);
     avatarLetter.textContent = p ? ((p.a.charAt(0) || "?") + (p.b.charAt(0) || "?")).toUpperCase() : "\u2026";
@@ -1423,6 +1463,7 @@ async function refreshPeople() {
     }
   } catch (e) {}
   refreshAvatarDots();
+  syncPfpsFromServer(false);
   await refreshAdminDmThreads();
   refreshListView();
   if (convo.mode === "dm") applyHeader();
@@ -1535,12 +1576,14 @@ async function openDm(name) {
   const knownThread = dmThreads.find((x) => x.peer === peer);
   dmPeerRead = Number((knownThread && knownThread.read) || 0);
   applyHeader();
+  syncPfpsFromServer(!pfpFor(peer));
   const hold = dmDom.get(peer);
   const cached = !!(hold && hold.childNodes.length);
   dmMessagesEl.textContent = "";
   if (cached) {
     while (hold.firstChild) dmMessagesEl.appendChild(hold.firstChild);
     reclassifyOwnership();
+    updateBubbleTails();
     scheduleDaySeps();
     scrollCtnEl.scrollTop = dmScrollTops.get(peer) || 0;
     updateScrollBtn();
@@ -1644,10 +1687,22 @@ function bumpDmUnread(peer, m) {
 function applyDmEditDom(host, m) {
   const n = findMsgDomIn(host, String(m.id || ""));
   if (!n) return;
+  const editedObj = msgByWrap.get(n);
+  if (editedObj && typeof m.text === "string" && editedObj.t !== "img") editedObj.text = m.text;
   const bubble = n.querySelector(".bubble");
   if (!bubble || bubble.classList.contains("imgBubble")) return;
   const bt = bubble.querySelector(".btext");
-  if (bt) { bt.innerHTML = linkifyHtml(m.text); syncEmojiClass(bubble, m.text); }
+  if (bt) {
+    removeTogFor(bt);
+    bt.classList.remove("translated");
+    delete bt.dataset.tOrig;
+    delete bt.dataset.tTrans;
+    delete bt.dataset.tBusy;
+    delete bt.dataset.tSkip;
+    bt.innerHTML = linkifyHtml(m.text);
+    syncEmojiClass(bubble, m.text);
+    if (translateOn && !n.classList.contains("out")) scheduleRealtimeTranslation(bt);
+  }
   const ts = bubble.querySelector(".tsrow");
   if (ts && !ts.querySelector(".editedMark")) ts.insertBefore(el("span", "editedMark", "edited"), ts.firstChild);
 }
@@ -2703,99 +2758,213 @@ function wordTokens(text) {
 }
 function looksEnglish(text) {
   const toks = wordTokens(text);
-  let foreign = false;
+  if (!toks.length) return true;
+  let enHits = 0;
+  let foreignHits = 0;
   for (const t of toks) {
-    if (EN_WORDS.has(t)) return true;
-    if (FOREIGN_WORDS.has(t)) foreign = true;
+    if (EN_WORDS.has(t)) enHits++;
+    else if (FOREIGN_WORDS.has(t)) foreignHits++;
   }
-  if (foreign) return false;
-  // No word evidence either way. Only plain-Latin text is spared a request (a
-  // bare "ok" or "lol" isn't worth one); a message in another alphabet - which
-  // has no spaces to tokenise, so it always looks "short" here - still goes to
-  // the translator, like it always did.
-  return toks.length <= 3 && /^[\x00-\x7F\s]*$/.test(String(text));
+  if (foreignHits > 0 && enHits < foreignHits * 3) return false;
+  if (enHits > 0) return true;
+  // Single ultra-short ASCII token (e.g. "ok", "hm", "yo") is not worth a call;
+  // longer unknown Latin text (e.g. Romanized Hindi/Russian/etc.) still translates.
+  return toks.length === 1 && toks[0].length <= 3 && /^[\x00-\x7F\s]*$/.test(String(text));
+}
+
+const _graphemeSeg = (typeof Intl !== "undefined" && Intl.Segmenter)
+  ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+  : null;
+function segmentGraphemes(s) {
+  const str = String(s == null ? "" : s);
+  if (!str) return [];
+  if (_graphemeSeg) {
+    try { return [..._graphemeSeg.segment(str)].map((x) => x.segment); } catch (e) {}
+  }
+  return Array.from(str);
+}
+
+/* Split a message into:
+   - lead / trail: leading & trailing emoji (+ surrounding spaces) that never need
+     to be sent to the translator and are re-attached verbatim after translation.
+   - core: middle text with inline emojis, URLs, and @mentions replaced by stable
+     numeric placeholders [[0]], [[1]], ... so translators never corrupt or drop them.
+   - skip: true if no translatable letters remain (emoji-only, numbers, punctuation,
+     pure URLs, pure @mentions, bare image links, etc.). */
+function prepareTextForTranslation(raw) {
+  const s = String(raw == null ? "" : raw);
+  const trimmed = s.trim();
+  if (!trimmed || isEmojiOnlyText(trimmed)) return { skip: true, raw: s };
+
+  const gs = segmentGraphemes(s);
+  let start = 0;
+  let end = gs.length;
+
+  // Peel leading emojis and whitespace, only keeping spaces attached to a leading emoji.
+  let leadEnd = 0;
+  while (start < end) {
+    const g = gs[start];
+    if (g.trim() === "") { start++; continue; }
+    if (hasEmoji(g)) { start++; leadEnd = start; continue; }
+    break;
+  }
+  // Include any spaces right after the last leading emoji so spacing is preserved.
+  let lead = "";
+  if (leadEnd > 0) {
+    let sp = leadEnd;
+    while (sp < end && gs[sp].trim() === "" && gs[sp] !== "\n") sp++;
+    lead = gs.slice(0, sp).join("");
+    start = sp;
+  } else {
+    start = 0;
+    while (start < end && gs[start].trim() === "") start++;
+  }
+
+  // Peel trailing emojis and whitespace.
+  let trailStart = end;
+  let scan = end - 1;
+  while (scan >= start) {
+    const g = gs[scan];
+    if (g.trim() === "") { scan--; continue; }
+    if (hasEmoji(g)) { trailStart = scan; scan--; continue; }
+    break;
+  }
+  let trail = "";
+  if (trailStart < end) {
+    let sp = trailStart - 1;
+    while (sp >= start && gs[sp].trim() === "" && gs[sp] !== "\n") sp--;
+    trail = gs.slice(sp + 1, end).join("");
+    end = sp + 1;
+  } else {
+    while (end > start && gs[end - 1].trim() === "") end--;
+  }
+
+  const middle = gs.slice(start, end).join("");
+  if (!middle.trim()) return { skip: true, raw: s };
+
+  const tokens = [];
+  const addToken = (val) => {
+    const idx = tokens.length;
+    tokens.push(val);
+    return "[[" + idx + "]]";
+  };
+
+  // Protect URLs and @mentions first.
+  let masked = middle.replace(/https?:\/\/[^\s<>]+|www\.[^\s<>]+/gi, (m) => addToken(m));
+  masked = masked.replace(/(^|\s)(@[A-Za-z0-9_-]{2,24})(?=$|[\s.,!?;:)])/g, (all, pre, handle) => pre + addToken(handle));
+
+  // Protect inline emoji runs so emojis stay in place and are never translated or stripped.
+  const mgs = segmentGraphemes(masked);
+  let core = "";
+  let emojiBuf = "";
+  for (let i = 0; i < mgs.length; i++) {
+    const g = mgs[i];
+    if (hasEmoji(g)) {
+      emojiBuf += g;
+    } else {
+      if (emojiBuf) { core += addToken(emojiBuf); emojiBuf = ""; }
+      core += g;
+    }
+  }
+  if (emojiBuf) core += addToken(emojiBuf);
+
+  const lettersOnly = core.replace(/\[\[\d+\]\]/g, " ").trim();
+  // Skip if there are no letters in any script (pure numbers, symbols, URLs, mentions, emoticons).
+  if (!lettersOnly || !/\p{L}/u.test(lettersOnly)) {
+    return { skip: true, raw: s };
+  }
+
+  return { skip: false, raw: s, lead, trail, core: core.trim(), tokens, lettersOnly };
+}
+
+function restoreTranslatedText(prep, translatedCore) {
+  let out = String(translatedCore || "").trim();
+  if (!out) return prep.raw;
+  const used = new Set();
+  if (prep.tokens.length) {
+    out = out.replace(/(?:\[\s*\[\s*(\d+)\s*\]\s*\]|【\s*(\d+)\s*】|［\s*［\s*(\d+)\s*］\s*］)/g, (m, a, b, c) => {
+      const idx = parseInt(a != null ? a : (b != null ? b : c), 10);
+      if (!Number.isNaN(idx) && idx >= 0 && idx < prep.tokens.length) {
+        used.add(idx);
+        return prep.tokens[idx];
+      }
+      return m;
+    });
+    // Safety net: never lose an emoji, URL, or @mention if an engine dropped its placeholder.
+    const missing = [];
+    for (let i = 0; i < prep.tokens.length; i++) {
+      if (!used.has(i)) missing.push(prep.tokens[i]);
+    }
+    if (missing.length) out = out + " " + missing.join(" ");
+  }
+  out = out.replace(/[ \t]{2,}/g, " ").trim();
+  const full = (prep.lead || "") + out + (prep.trail || "");
+  return full.trim();
+}
+
+function normTransCompare(s) {
+  return String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function alreadyInTargetLang(text) {
   if (!translateOn || !text || !String(text).trim()) return false;
   const lang = translateLang;
-  if (lang === "ru" || lang === "uk") return /[\u0400-\u04ff]/.test(text);
-  if (lang === "zh") return /[\u4e00-\u9fff]/.test(text);
-  if (lang === "ja") return /[\u3040-\u30ff]/.test(text);
-  if (lang === "ko") return /[\uac00-\ud7af]/.test(text);
-  if (lang === "ar") return /[\u0600-\u06ff]/.test(text);
-  if (lang === "th") return /[\u0e00-\u0e7f]/.test(text);
-  if (lang === "hi") return /[\u0900-\u097f]/.test(text);
-  if (lang === "ta") return /[\u0b80-\u0bff]/.test(text);
-  if (lang === "ml") return /[\u0d00-\u0d7f]/.test(text);
-  if (lang === "he") return /[\u0590-\u05ff]/.test(text);
-  if (lang === "en") return looksEnglish(text);
+  const s = String(text);
+  // Distinguish Ukrainian vs Russian accurately: only short-circuit on language-unique Cyrillic letters.
+  if (lang === "uk") return /[іїєґІЇЄҐ]/.test(s) && !/[ыэъёЫЭЪЁ]/.test(s);
+  if (lang === "ru") return /[ыэъёЫЭЪЁ]/.test(s) && !/[іїєґІЇЄҐ]/.test(s);
+  if (lang === "zh") return /[\u4e00-\u9fff]/.test(s) && !/[\u3040-\u30ff\uac00-\ud7af]/.test(s);
+  if (lang === "ja") return /[\u3040-\u30ff]/.test(s);
+  if (lang === "ko") return /[\uac00-\ud7af]/.test(s);
+  if (lang === "ar") return /[\u0600-\u06ff]/.test(s) && !/[پچژگٹڈڑںےھ]/.test(s);
+  if (lang === "ur") return /[پچژگٹڈڑںےھ]/.test(s);
+  if (lang === "th") return /[\u0e00-\u0e7f]/.test(s);
+  if (lang === "hi") return /[\u0900-\u097f]/.test(s);
+  if (lang === "bn") return /[\u0980-\u09ff]/.test(s);
+  if (lang === "ta") return /[\u0b80-\u0bff]/.test(s);
+  if (lang === "ml") return /[\u0d00-\u0d7f]/.test(s);
+  if (lang === "he") return /[\u0590-\u05ff]/.test(s);
+  if (lang === "en") return looksEnglish(s);
   return false;
 }
 
-function translateSystemPrompt() {
-  const lang = langName(translateLang);
-  return "Translate every message into " + lang + ".\n\n" +
-    "You are a highly accurate translator specializing in Ukrainian and Russian, including slang, casual speech, regional expressions, and texting language.\n\n" +
-    "Your highest priority is to preserve the ORIGINAL meaning, tone, emotional intensity, and personality of the message.\n\n" +
-    "IMPORTANT RULES:\n\n" +
-    "1. NEVER underestimate the tone.\n" +
-    "   This is a TEXT MESSAGE, not a voice note. Do not assume the speaker is joking, calm, friendly, or less serious simply because there is no vocal tone.\n\n" +
-    "2. Preserve the exact emotional intensity.\n" +
-    "   If the original sounds angry, annoyed, cold, rude, affectionate, sarcastic, playful, aggressive, or serious, keep that same level in the translation.\n\n" +
-    "3. NEVER soften the message.\n" +
-    "   Do not turn an angry message into a polite one, a rude message into a friendly one, or a serious message into a casual one.\n\n" +
-    "4. NEVER strengthen the message.\n" +
-    "   Do not make a message more aggressive, insulting, emotional, threatening, or vulgar than the original.\n\n" +
-    "5. BAD WORDS / PROFANITY:\n" +
-    "   Only use profanity, swear words, insults, or vulgar language in the translation if they are actually present in the original message.\n\n" +
-    "   If the original contains a swear word, preserve its meaning and approximate strength in the target language.\n\n" +
-    "   If the original does NOT contain a swear word, DO NOT add one just because a stronger or more natural translation might use it.\n\n" +
-    "6. Do not invent emotions, intentions, insults, affection, sarcasm, jokes, or hidden meanings.\n\n" +
-    "7. Do not guess what the speaker \"really meant.\"\n" +
-    "   Translate what the speaker actually wrote.\n\n" +
-    "8. Context may ONLY be used to understand references, unclear words, pronouns, or missing context. Context must NEVER be used as a reason to change the tone or emotional intensity.\n\n" +
-    "9. Preserve slang, abbreviations, texting style, punctuation, repetition, emojis, and emphasis whenever they contribute to the tone.\n\n" +
-    "10. Do not automatically make informal messages more formal or formal messages more casual.\n\n" +
-    "11. If the original is short, keep the translation comparably short. Do not expand it with explanations.\n\n" +
-    "12. If a phrase has multiple possible meanings, choose the interpretation closest to the literal meaning and original tone rather than choosing the friendliest interpretation.\n\n" +
-    "13. If the original message is already entirely in the target language, return it exactly as written. Do not rewrite, correct, or improve it.\n\n" +
-    "14. The translation must sound like the SAME PERSON saying the SAME THING in another language.\n\n" +
-    "15. Output ONLY the translation. Never add explanations, interpretations, tone labels, warnings, or commentary.\n\n" +
-    "REMEMBER:\n" +
-    "You are a translator, NOT a mediator, relationship advisor, censor, or tone improver.\n\n" +
-    "Your job is not to make the conversation nicer.\n" +
-    "Your job is to accurately communicate what the person wrote.";
+const TRANS_CACHE_MAX = 600;
+const transCache = new Map();
+function transCacheGet(lang, core) {
+  const key = lang + "\0" + core;
+  if (!transCache.has(key)) return null;
+  const val = transCache.get(key);
+  // Refresh LRU order.
+  transCache.delete(key);
+  transCache.set(key, val);
+  return val;
+}
+function transCacheSet(lang, core, val) {
+  const key = lang + "\0" + core;
+  if (transCache.has(key)) transCache.delete(key);
+  transCache.set(key, val);
+  if (transCache.size > TRANS_CACHE_MAX) {
+    const oldest = transCache.keys().next().value;
+    if (oldest !== undefined) transCache.delete(oldest);
+  }
 }
 
-function getTranslationContext(beforeWrap) {
-  const lines = [];
-  for (const child of messagesEl.children) {
-    if (!child.classList || !child.classList.contains("msg")) continue;
-    if (beforeWrap && child === beforeWrap) break;
-    const m = msgByWrap.get(child);
-    if (!m || m.t !== "chat") continue;
-    const text = String(m.text || "").trim();
-    if (!text) continue;
-    lines.push("[" + (String(m.from || "unknown").trim() || "unknown") + "]: " + text);
-  }
-  return lines.slice(-5).join("\n");
-}
+let translateGen = 0;
 
-async function translateContextualMessage(targetMessage, contextString) {
-  const target = String(targetMessage || "").trim();
-  if (!target) return "";
-  if (!root.ai) return target;
-  try {
-    const result = await root.ai({
-      instruction: translateSystemPrompt() + "\n\nContext:\n" + contextString + "\n\nTranslate this:\n" + target,
-      temperature: 0.4
-    });
-    const out = String(result && result.text != null ? result.text : result || "").trim();
-    return out || target;
-  } catch (e) {
-    return target;
+async function translateCoreBatch(cores, lang) {
+  if (!cores.length) return { translations: [], sameLang: [] };
+  if (root && typeof root.translateTexts === "function") {
+    try {
+      const res = await root.translateTexts(cores, lang);
+      if (res && Array.isArray(res.translations) && res.translations.length === cores.length) {
+        return {
+          translations: res.translations,
+          sameLang: Array.isArray(res.sameLang) ? res.sameLang : cores.map(() => false)
+        };
+      }
+    } catch (e) {}
   }
+  return { translations: cores.slice(), sameLang: cores.map(() => false) };
 }
 
 function removeTogFor(el) {
@@ -2811,20 +2980,26 @@ function removeTogFor(el) {
   const sib = el.nextElementSibling;
   if (sib && sib.classList && sib.classList.contains("transTog")) sib.remove();
 }
-function setTransResult(el, tog, trans, orig) {
-  if (!trans || trans === orig) { removeTogFor(el); return; }
+function setTransResult(el, tog, trans, orig, lang) {
+  if (!trans || normTransCompare(trans) === normTransCompare(orig)) {
+    removeTogFor(el);
+    if (lang) el.dataset.tSkip = lang;
+    return;
+  }
+  delete el.dataset.tSkip;
   el.dataset.tOrig = orig;
   el.dataset.tTrans = trans;
   el.innerHTML = linkifyHtml(trans);
   el.classList.add("translated");
-  if (tog) { tog.hidden = false; tog.textContent = "Show original"; }
+  const t = tog || makeTog(el);
+  if (t) { t.hidden = false; t.textContent = "Show original"; }
 }
 function makeTog(el) {
   removeTogFor(el);
   const tog = document.createElement("span");
   tog.className = "transTog";
   tog.hidden = false;
-  tog.textContent = "Translating…";
+  tog.textContent = "Translating\u2026";
   const bubble = el.closest(".bubble");
   const ts = bubble ? bubble.querySelector(".tsrow") : null;
   if (ts) {
@@ -2845,125 +3020,107 @@ function makeTog(el) {
 }
 function transBubbleOf(msgEl) {
   const m = msgByWrap.get(msgEl);
-  if (!m) return null;
-  if (m.t === "chat") {
-    const el = msgEl.querySelector(".btext");
-    if (!el || el.dataset.tOrig !== undefined) return null;
-    return (m.text || "").trim() ? el : null;
-  }
-  if (m.t === "img" && m.caption) {
-    const el = msgEl.querySelector(".caption");
-    if (!el || el.dataset.tOrig !== undefined) return null;
-    return String(m.caption).trim() ? el : null;
-  }
-  return null;
+  if (!m || m.t !== "chat") return null;
+  const el = msgEl.querySelector(".btext");
+  if (!el || el.dataset.tOrig !== undefined) return null;
+  return (m.text || "").trim() ? el : null;
 }
-async function translateBubbleOne(el, origText) {
-  if (!el || !origText || !origText.trim()) return;
-  if (el.dataset.tOrig !== undefined) return;
-  if (alreadyInTargetLang(origText)) { removeTogFor(el); return; }
-  const tog = makeTog(el);
-  el.dataset.tBusy = "1";
-  try {
-    const ctx = getTranslationContext(el.closest(".msg"));
-    const t = await translateContextualMessage(origText, ctx);
-    setTransResult(el, tog, t, origText);
-  } finally {
-    delete el.dataset.tBusy;
+
+function origTextForEl(el) {
+  const wrap = el.closest(".msg");
+  const m = wrap ? msgByWrap.get(wrap) : null;
+  if (m) {
+    if (m.t === "img") return "";
+    return String(m.text != null ? m.text : (el.textContent || "")).trim();
   }
+  return String(el.textContent || "").trim();
 }
-function batchPrompt(n) {
-  return translateSystemPrompt() + "\n\nBATCH MODE: Translate all " + n + " of the messages below in one pass. Output exactly " + n + " numbered lines, one translation per line, in the same order, in this exact format: 1. <translation>, 2. <translation>, etc. Output strictly the " + n + " translated lines and nothing else - no explanations, no headings, no extra text.";
-}
-function tryParseJsonArray(out) {
-  const fenced = out.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
-  const body = fenced ? fenced[1] : out;
-  const m = body.match(/\[[\s\S]*\]/);
-  if (!m) return null;
-  try {
-    const arr = JSON.parse(m[0]);
-    return Array.isArray(arr) ? arr : null;
-  } catch (e) { return null; }
-}
-function parseBatchTranslations(out, n) {
-  if (!out) return null;
-  const json = tryParseJsonArray(out);
-  if (json && json.length === n && json.every((s) => typeof s === "string" && s.trim())) {
-    return json.map((s) => s.trim());
-  }
-  const numbered = [...out.matchAll(/^\s*(\d+)[.)]\s*(.*)$/gm)];
-  if (numbered.length === n) {
-    const nums = numbered.map((m) => parseInt(m[1], 10));
-    if (nums.every((v, i) => v === i + 1)) return numbered.map((m) => m[2].trim());
-  }
-  const plain = out.split(/\n+/).map((s) => s.trim()).filter(Boolean);
-  if (plain.length === n) return plain;
-  return null;
-}
-async function translateContextualBatch(els, msgs) {
-  const n = els.length;
-  const ctx = getTranslationContext(els[0].closest(".msg"));
-  const numbered = els.map((el, i) => {
-    const m = msgs[i];
-    return (i + 1) + ". " + String(m.text ?? m.caption ?? el.textContent ?? "").trim();
-  }).join("\n");
-  if (!root.ai) return null;
-  try {
-    const result = await root.ai({
-      instruction: batchPrompt(n) + "\n\nContext:\n" + ctx + "\n\nMessages to translate:\n" + numbered,
-      temperature: 0.4
-    });
-    const out = String(result && result.text != null ? result.text : result || "").trim();
-    return parseBatchTranslations(out, n);
-  } catch (e) {
-    return null;
-  }
-}
-async function translateBatchEls(els) {
-  const entries = els
-    .map((el) => ({ el, m: msgByWrap.get(el.closest(".msg")) }))
-    .filter((x) => x.m && x.el.dataset.tOrig === undefined && x.el.dataset.tBusy === undefined)
-    .filter((x) => {
-      const orig = String(x.m.text ?? x.m.caption ?? x.el.textContent ?? "").trim();
-      if (!orig || isEmojiOnlyText(orig)) { removeTogFor(x.el); return false; }
-      if (alreadyInTargetLang(orig)) { removeTogFor(x.el); return false; }
-      return true;
-    });
-  if (!entries.length) return;
-  const groups = [];
-  let cur = null;
-  for (const e of entries) {
-    const author = String(e.m.from || "").trim();
-    if (!cur || cur.author !== author) {
-      cur = { author, list: [e] };
-      groups.push(cur);
-    } else {
-      cur.list.push(e);
+
+async function translateElementsBatch(els) {
+  const reqLang = translateLang;
+  const reqGen = translateGen;
+  if (!translateOn) return;
+
+  const toFetch = [];
+  for (const el of els) {
+    if (!el || !el.isConnected) continue;
+    if (el.closest(".imgBubble") || el.closest(".msg.out")) continue;
+    if (el.dataset.tOrig !== undefined || el.dataset.tBusy !== undefined) continue;
+    if (el.dataset.tSkip === reqLang) continue;
+
+    const orig = origTextForEl(el);
+    const prep = prepareTextForTranslation(orig);
+    if (prep.skip || alreadyInTargetLang(prep.lettersOnly)) {
+      removeTogFor(el);
+      el.dataset.tSkip = reqLang;
+      continue;
     }
-  }
-  for (const g of groups) {
-    for (const e of g.list) e.el.dataset.tBusy = "1";
-    const togs = g.list.map((e) => makeTog(e.el));
-    try {
-      const translations = await translateContextualBatch(g.list.map((e) => e.el), g.list.map((e) => e.m));
-      if (translations && translations.length === g.list.length) {
-        g.list.forEach((e, i) => {
-          const orig = String(e.m.text ?? e.m.caption ?? e.el.textContent ?? "").trim();
-          setTransResult(e.el, togs[i], translations[i], orig);
-        });
+
+    const cached = transCacheGet(reqLang, prep.core);
+    if (cached) {
+      if (cached.sameLang) {
+        removeTogFor(el);
+        el.dataset.tSkip = reqLang;
       } else {
-        for (let i = 0; i < g.list.length; i++) {
-          const e = g.list[i];
-          const orig = String(e.m.text ?? e.m.caption ?? e.el.textContent ?? "").trim();
-          const t = await translateContextualMessage(orig, getTranslationContext(e.el.closest(".msg")));
-          setTransResult(e.el, togs[i], t, orig);
+        const finalText = restoreTranslatedText(prep, cached.trans);
+        setTransResult(el, null, finalText, orig, reqLang);
+      }
+      continue;
+    }
+
+    toFetch.push({ el, orig, prep, tog: null });
+  }
+
+  if (!toFetch.length) return;
+
+  for (const item of toFetch) {
+    item.el.dataset.tBusy = "1";
+    item.tog = makeTog(item.el);
+  }
+
+  const CHUNK = 12;
+  try {
+    for (let i = 0; i < toFetch.length; i += CHUNK) {
+      if (!translateOn || translateGen !== reqGen || translateLang !== reqLang) {
+        for (let k = i; k < toFetch.length; k++) removeTogFor(toFetch[k].el);
+        return;
+      }
+      const chunk = toFetch.slice(i, i + CHUNK);
+      const cores = chunk.map((x) => x.prep.core);
+      const res = await translateCoreBatch(cores, reqLang);
+
+      if (!translateOn || translateGen !== reqGen || translateLang !== reqLang) {
+        for (const item of chunk) removeTogFor(item.el);
+        return;
+      }
+
+      for (let j = 0; j < chunk.length; j++) {
+        const item = chunk[j];
+        const rawOut = String((res.translations && res.translations[j]) || "").trim();
+        const isSame = !!(res.sameLang && res.sameLang[j]) || !rawOut || normTransCompare(rawOut) === normTransCompare(item.prep.core);
+        if (isSame) {
+          transCacheSet(reqLang, item.prep.core, { trans: item.prep.core, sameLang: true });
+          removeTogFor(item.el);
+          item.el.dataset.tSkip = reqLang;
+        } else {
+          transCacheSet(reqLang, item.prep.core, { trans: rawOut, sameLang: false });
+          const finalText = restoreTranslatedText(item.prep, rawOut);
+          setTransResult(item.el, item.tog, finalText, item.orig, reqLang);
         }
       }
-    } finally {
-      for (const e of g.list) delete e.el.dataset.tBusy;
     }
+  } finally {
+    for (const item of toFetch) delete item.el.dataset.tBusy;
   }
 }
+
+async function translateBatchEls(els) {
+  return translateElementsBatch(els);
+}
+async function translateLooseEls(els) {
+  return translateElementsBatch(els);
+}
+
 let translateLock = Promise.resolve();
 function withTranslateLock(fn) {
   const p = translateLock.then(() => fn());
@@ -2973,14 +3130,36 @@ function withTranslateLock(fn) {
 const rtPending = new Set();
 let rtTimer = null;
 function scheduleRealtimeTranslation(el) {
-  if (!el || el.dataset.tOrig !== undefined || el.dataset.tBusy !== undefined) return;
-  const txt = String(el.textContent || "").trim();
-  if (!txt || isEmojiOnlyText(txt)) return;
+  if (!translateOn || !el || el.closest(".imgBubble") || el.closest(".msg.out")) return;
+  if (el.dataset.tOrig !== undefined || el.dataset.tBusy !== undefined) return;
+  if (el.dataset.tSkip === translateLang) return;
+
+  const orig = origTextForEl(el);
+  const prep = prepareTextForTranslation(orig);
+  if (prep.skip || alreadyInTargetLang(prep.lettersOnly)) {
+    removeTogFor(el);
+    el.dataset.tSkip = translateLang;
+    return;
+  }
+
+  // Instant 0ms path if already cached.
+  const cached = transCacheGet(translateLang, prep.core);
+  if (cached) {
+    if (cached.sameLang) {
+      removeTogFor(el);
+      el.dataset.tSkip = translateLang;
+    } else {
+      const finalText = restoreTranslatedText(prep, cached.trans);
+      setTransResult(el, null, finalText, orig, translateLang);
+    }
+    return;
+  }
+
   el.dataset.tBusy = "1";
   makeTog(el);
   rtPending.add(el);
   if (rtTimer) clearTimeout(rtTimer);
-  rtTimer = setTimeout(() => { rtTimer = null; flushRealtimeTranslation(); }, 1000);
+  rtTimer = setTimeout(() => { rtTimer = null; flushRealtimeTranslation(); }, 250);
 }
 async function flushRealtimeTranslation() {
   const els = [...rtPending];
@@ -2991,61 +3170,33 @@ async function flushRealtimeTranslation() {
     return;
   }
   for (const el of els) delete el.dataset.tBusy;
-  await withTranslateLock(() => translateBatchEls(els));
+  await withTranslateLock(() => translateElementsBatch(els));
 }
 function elInViewport(el) {
   const c = scrollCtnEl.getBoundingClientRect();
   const r = el.getBoundingClientRect();
-  return r.bottom > c.top && r.top < c.bottom;
+  return r.width > 0 && r.height > 0 && r.bottom > c.top && r.top < c.bottom;
 }
-/* Every element that can hold translatable text: a message body, a caption, and
-   the original shown under a "deleted message" tombstone (`.delOrigText`, which
-   only ever exists inside an admin-only box). The tombstone's own "… deleted
-   this message" line is chrome, not something anyone said, so `.delnoteText` is
-   deliberately left out. Shared by everything below so the three sweeps can
-   never drift apart. */
-const TRANS_SEL = ".btext:not(.delnoteText), .imgBubble .caption, .delOrigText, .asDmText, .asDelText";
-/* What translation touches right now: incoming bubbles. Only what is on screen
-   and not already translated or in flight. */
+/* Translatable text elements only (never image bubbles or deleted-message chrome). */
+const TRANS_SEL = ".btext:not(.delnoteText), .delOrigText, .asDmText, .asDelText";
+/* What translation touches right now: visible incoming text bubbles in the active view. */
 function translationTargets() {
-  return [...document.querySelectorAll(TRANS_SEL)]
-    .filter((el) => !el.closest(".msg.out") && el.dataset.tOrig === undefined && el.dataset.tBusy === undefined && elInViewport(el));
-}
-/* The admin's monitor cards carry no `.msg` wrap, so they cannot go through the
-   batch path (which reads its message off the wrap). They are translated here,
-   in chunks, so a long monitored conversation costs a handful of calls rather
-   than one per message. Both participants' messages are translated, because a
-   monitor card is never `.msg.out`. */
-async function translateLooseEls(els) {
-  const entries = els
-    .filter((el) => el.dataset.tOrig === undefined && el.dataset.tBusy === undefined)
-    .map((el) => ({ el, text: String(el.textContent || "").trim() }))
-    .filter((e) => e.text && !isEmojiOnlyText(e.text) && !alreadyInTargetLang(e.text));
-  if (!entries.length || !root.ai) return;
-  for (const e of entries) { e.tog = makeTog(e.el); e.el.dataset.tBusy = "1"; }
-  const CHUNK = 12;
-  try {
-    for (let i = 0; i < entries.length; i += CHUNK) {
-      const chunk = entries.slice(i, i + CHUNK);
-      let out = null;
-      try {
-        const numbered = chunk.map((e, j) => (j + 1) + ". " + e.text).join("\n");
-        const result = await root.ai({
-          instruction: batchPrompt(chunk.length) + "\n\nMessages to translate:\n" + numbered,
-          temperature: 0.4
-        });
-        const txt = String(result && result.text != null ? result.text : result || "").trim();
-        out = parseBatchTranslations(txt, chunk.length);
-      } catch (e) {}
-      for (let j = 0; j < chunk.length; j++) {
-        const e = chunk[j];
-        const t = out ? out[j] : await translateContextualMessage(e.text, "");
-        setTransResult(e.el, e.tog, t, e.text);
-      }
+  const roots = [];
+  if (convo.mode === "dm") roots.push(dmMessagesEl);
+  else if (convo.mode === "monitor") roots.push(monitorBody);
+  else if (convo.mode === "room") roots.push(roomMessagesEl);
+  if (typeof adminSide !== "undefined" && adminSide && !adminSide.classList.contains("hide")) roots.push(adminSide);
+  const out = [];
+  for (const rootEl of roots) {
+    if (!rootEl) continue;
+    for (const el of rootEl.querySelectorAll(TRANS_SEL)) {
+      if (el.closest(".imgBubble") || el.closest(".msg.out")) continue;
+      if (el.dataset.tOrig !== undefined || el.dataset.tBusy !== undefined) continue;
+      if (el.dataset.tSkip === translateLang) continue;
+      if (rootEl === adminSide || elInViewport(el)) out.push(el);
     }
-  } finally {
-    for (const e of entries) delete e.el.dataset.tBusy;
   }
+  return out;
 }
 
 async function translateViewport() {
@@ -3053,13 +3204,13 @@ async function translateViewport() {
   await withTranslateLock(async () => {
     const targets = translationTargets();
     if (!targets.length) return;
-    const inMsg = targets.filter((el) => el.closest(".msg"));
-    const loose = targets.filter((el) => !el.closest(".msg"));
-    if (inMsg.length) await translateBatchEls(inMsg);
-    if (loose.length) await translateLooseEls(loose);
+    await translateElementsBatch(targets);
   });
 }
 function retranslateAll() {
+  translateGen++;
+  if (rtTimer) { clearTimeout(rtTimer); rtTimer = null; }
+  rtPending.clear();
   for (const b of document.querySelectorAll(TRANS_SEL)) {
     if (b.closest(".msg.out")) continue;
     removeTogFor(b);
@@ -3068,16 +3219,22 @@ function retranslateAll() {
     delete b.dataset.tOrig;
     delete b.dataset.tTrans;
     delete b.dataset.tBusy;
+    delete b.dataset.tSkip;
     b.innerHTML = linkifyHtml(orig);
   }
   if (translateOn) translateViewport();
 }
 function restoreAllOriginal() {
+  translateGen++;
+  if (rtTimer) { clearTimeout(rtTimer); rtTimer = null; }
+  rtPending.clear();
   for (const b of document.querySelectorAll(TRANS_SEL)) {
+    removeTogFor(b);
+    delete b.dataset.tBusy;
+    delete b.dataset.tSkip;
     if (b.dataset.tOrig !== undefined) {
       b.innerHTML = linkifyHtml(b.dataset.tOrig);
       b.classList.remove("translated");
-      removeTogFor(b);
       delete b.dataset.tOrig;
       delete b.dataset.tTrans;
     }
@@ -4833,11 +4990,6 @@ function translateRealtimeMessage(m, wrap) {
     if (el && el.dataset.tOrig === undefined && el.dataset.tBusy === undefined) {
       scheduleRealtimeTranslation(el);
     }
-  } else if (m.t === "img" && m.caption) {
-    const cap = wrap.querySelector(".caption");
-    if (cap && cap.dataset.tOrig === undefined && cap.dataset.tBusy === undefined) {
-      scheduleRealtimeTranslation(cap);
-    }
   }
 }
 
@@ -5261,7 +5413,17 @@ function handleMessage(m) {
           } else if (cap) cap.remove();
         } else {
           const bt = bubble.querySelector(".btext");
-          if (bt) { bt.innerHTML = linkifyHtml(m.text); syncEmojiClass(bubble, m.text); }
+          if (bt) {
+            removeTogFor(bt);
+            bt.classList.remove("translated");
+            delete bt.dataset.tOrig;
+            delete bt.dataset.tTrans;
+            delete bt.dataset.tBusy;
+            delete bt.dataset.tSkip;
+            bt.innerHTML = linkifyHtml(m.text);
+            syncEmojiClass(bubble, m.text);
+            if (translateOn && !n.classList.contains("out")) scheduleRealtimeTranslation(bt);
+          }
         }
         const ts = bubble.querySelector(".tsrow");
         if (ts && !ts.querySelector(".editedMark")) {
