@@ -217,7 +217,17 @@ function dmRowToMsg(row) {
 function dmRowsAll() {
   return restJson("messages?select=id,ts,sender,type,text,url,dur,size,reply_to&type=like.dm.*&order=ts.desc&limit=2000").then(function (r) { return Array.isArray(r) ? r : []; });
 }
-var LANG_CODE = { english: "en", spanish: "es", french: "fr", german: "de", portuguese: "pt", italian: "it", russian: "ru", ukrainian: "uk", polish: "pl", dutch: "nl", turkish: "tr", arabic: "ar", hindi: "hi", bengali: "bn", urdu: "ur", chinese: "zh", japanese: "ja", korean: "ko", vietnamese: "vi", thai: "th", indonesian: "id", malay: "ms", filipino: "fil", swahili: "sw", malayalam: "ml", tamil: "ta" };
+var LANG_CODE = { english: "en", spanish: "es", french: "fr", german: "de", portuguese: "pt", italian: "it", russian: "ru", ukrainian: "uk", polish: "pl", dutch: "nl", turkish: "tr", arabic: "ar", hindi: "hi", bengali: "bn", urdu: "ur", chinese: "zh-CN", japanese: "ja", korean: "ko", vietnamese: "vi", thai: "th", indonesian: "id", malay: "ms", filipino: "tl", swahili: "sw", malayalam: "ml", tamil: "ta", hebrew: "he" };
+var TARGET_ALIAS = { zh: "zh-CN", "zh-cn": "zh-CN", fil: "tl", iw: "he" };
+function normLangCode(code) {
+  var c = String(code || "en").trim().toLowerCase();
+  if (TARGET_ALIAS[c]) return TARGET_ALIAS[c];
+  return c || "en";
+}
+function baseLangCode(code) {
+  var c = normLangCode(code).toLowerCase();
+  return c.split("-")[0];
+}
 function targetOfInstruction(ins) {
   var m = String(ins || "").match(/Translate every message into ([A-Za-z ()/-]+)\./);
   if (m) {
@@ -242,15 +252,63 @@ function parseBatch(ins) {
   return { n: n, list: list };
 }
 function googleDirect(texts, target) {
+  var tg = normLangCode(target);
+  var tgBase = baseLangCode(tg);
   var jobs = texts.map(function (t) {
-    var u = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=" + encodeURIComponent(target) + "&q=" + encodeURIComponent(t);
-    return fetch(u).then(function (r) { return r.json(); }).then(function (j) {
+    var trimmed = String(t || "").trim();
+    if (!trimmed) return Promise.resolve({ text: t, sameLang: true });
+    var u = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=" + encodeURIComponent(tg) + "&dt=t&q=" + encodeURIComponent(trimmed);
+    return fetch(u).then(function (r) { if (!r.ok) throw new Error("gtx " + r.status); return r.json(); }).then(function (j) {
       var s = "";
-      if (j && j[0]) for (var i = 0; i < j[0].length; i++) s += j[0][i][0] || "";
-      return s || t;
-    }).catch(function () { return t; });
+      if (j && Array.isArray(j[0])) {
+        for (var i = 0; i < j[0].length; i++) {
+          if (j[0][i] && j[0][i][0]) s += j[0][i][0];
+        }
+      }
+      var src = (j && typeof j[2] === "string") ? j[2] : "";
+      var out = String(s || "").trim() || trimmed;
+      var same = !!(src && baseLangCode(src) === tgBase && out.toLowerCase() === trimmed.toLowerCase());
+      return { text: out, sameLang: same };
+    }).catch(function () { return { text: trimmed, sameLang: false }; });
   });
-  return Promise.all(jobs);
+  return Promise.all(jobs).then(function (res) {
+    return {
+      translations: res.map(function (x) { return x.text; }),
+      sameLang: res.map(function (x) { return x.sameLang; })
+    };
+  });
+}
+function translateTexts(texts, target) {
+  var list = Array.isArray(texts) ? texts.map(function (t) { return String(t == null ? "" : t); }) : [];
+  if (!list.length) return Promise.resolve({ translations: [], sameLang: [] });
+  var tg = normLangCode(target);
+  function allUnchangedAndUnsure(res) {
+    if (!res || !Array.isArray(res.translations) || res.translations.length !== list.length) return true;
+    var sl = Array.isArray(res.sameLang) ? res.sameLang : [];
+    for (var i = 0; i < list.length; i++) {
+      if (sl[i]) return false;
+      if (String(res.translations[i] || "").trim().toLowerCase() !== String(list[i] || "").trim().toLowerCase()) return false;
+    }
+    return true;
+  }
+  return fetch("/api/translate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texts: list, target: tg })
+  }).then(function (r) {
+    if (!r.ok) throw new Error("api " + r.status);
+    return r.json();
+  }).then(function (j) {
+    if (j && Array.isArray(j.translations) && j.translations.length === list.length && !allUnchangedAndUnsure(j)) {
+      return {
+        translations: j.translations,
+        sameLang: Array.isArray(j.sameLang) ? j.sameLang : list.map(function () { return false; })
+      };
+    }
+    return googleDirect(list, tg);
+  }).catch(function () {
+    return googleDirect(list, tg);
+  });
 }
 function aiTranslate(opts) {
   var ins = (opts && opts.instruction) || "";
@@ -263,28 +321,14 @@ function aiTranslate(opts) {
     texts = [sp.length > 1 ? sp[sp.length - 1].trim() : String(ins).trim()];
     batch = false;
   }
-  function sameAsInput(arr) {
-    if (!arr || !arr.length) return true;
-    for (var i = 0; i < Math.min(arr.length, texts.length); i++) {
-      if (String(arr[i] || "").trim().toLowerCase() !== String(texts[i] || "").trim().toLowerCase()) return false;
-    }
-    return true;
-  }
-  function done(arr) {
+  return translateTexts(texts, target).then(function (res) {
+    var arr = (res && res.translations) || texts;
     if (batch) {
       var lines = arr.map(function (t, i) { return (i + 1) + ". " + t; });
       return { text: lines.join("\n") };
     }
     return { text: arr[0] || texts[0] };
-  }
-  return fetch("/api/translate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ texts: texts, target: target })
-  }).then(function (r) { return r.json(); }).then(function (j) {
-    if (j && Array.isArray(j.translations) && j.translations.length && !sameAsInput(j.translations)) return done(j.translations);
-    return googleDirect(texts, target).then(done);
-  }).catch(function () { return googleDirect(texts, target).then(done); });
+  });
 }
 function kvStore(prefix) {
   return {
@@ -1435,6 +1479,7 @@ window.root = {
   superFetch: function (url, opts) { return fetch(url, opts); },
   uploadPlugin: uploadBlob,
   ai: aiTranslate,
+  translateTexts: translateTexts,
   createServerSocket: function () { return new SupaSocket(); }
 };
 fetch("/profanity.json").then(function (r) { return r.json(); }).then(function (a) {
