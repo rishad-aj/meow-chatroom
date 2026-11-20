@@ -5439,7 +5439,28 @@ function applyRename(from, to, uid) {
    unique per message - the sender stamps one per message and the server's send
    rate limit is 200ms - so a match can only ever be the same message. */
 function alreadyRendered(host, m) {
-  if (!host || !m || !m.from) return false;
+  if (!host || !m) return false;
+  if (m.t === "system") {
+    const txt = String(m.text || "").trim();
+    if (!txt) return true;
+    const ts = Number(m.ts) || Date.now();
+    const kids = host.children;
+    let lastSys = null;
+    for (let i = kids.length - 1; i >= 0 && i >= kids.length - 12; i--) {
+      const n = kids[i];
+      if (!n.classList || !n.classList.contains("sys")) continue;
+      if (!lastSys) lastSys = n;
+      const nTxt = String(n.textContent || "").trim();
+      const nTs = Number(n.dataset && n.dataset.ts) || 0;
+      if (nTxt === txt && (!nTs || Math.abs(ts - nTs) < 10000)) return true;
+    }
+    if (lastSys && String(lastSys.textContent || "").trim() === txt) {
+      const lTs = Number(lastSys.dataset && lastSys.dataset.ts) || 0;
+      if (!lTs || Math.abs(ts - lTs) < 30000) return true;
+    }
+    return false;
+  }
+  if (!m.from) return false;
   const id = m.id == null ? "" : String(m.id);
   const ts = Number(m.ts) || 0;
   for (const n of host.children) {
@@ -5453,11 +5474,18 @@ function alreadyRendered(host, m) {
 function handleMessage(m) {
   if (m.t === "dm") {
     handleDm(m);
-  } else if (m.t === "me") {
-    if (!savedNickApplied) myName = m.name;
   } else if (m.t === "chat" || m.t === "system" || m.t === "img" || m.t === "voice") {
-    if (m.t === "system" && /^Guest\d{4}\s+(is now|joined|left)\b/i.test(String(m.text || "").trim())) return;
-    if (historyLoading && (m.t === "chat" || m.t === "img" || m.t === "voice")) { historyBuffer.push(m); return; }
+    if (m.t === "system") {
+      const stxt = String(m.text || "").trim();
+      if (!stxt) return;
+      const lm = stxt.match(/^(.+?)\s+left$/i);
+      if (lm && lm[1]) stopTyping(lm[1].trim());
+    }
+    if (historyLoading || !historyLoaded) {
+      if (historyBuffer.length >= 200) historyBuffer.shift();
+      historyBuffer.push(m);
+      return;
+    }
     if (alreadyRendered(roomMessagesEl, m)) return;
     // Room traffic keeps rendering into the room, even when a private chat is
     // covering it - the room's DOM is never left stale, and its own unread
@@ -5497,12 +5525,12 @@ function handleMessage(m) {
         updateScrollBtn();
       }
     } else if (atRoom) {
-      scrollBottom();
+      if (wasNearBottom) scrollBottom(true);
+      else updateScrollBtn();
     }
     // Keeps the room's row in a wide layout (preview + unread count) current.
     refreshListView();
   } else if (m.t === "rename") {
-    if (/^Guest\d{4}$/i.test(String(m.from || ""))) return;
     applyRename(String(m.from || ""), String(m.to || ""), m.uid || "");
   } else if (m.t === "presence") {
     onlineCount = m.count;
@@ -5655,7 +5683,7 @@ function handleMessage(m) {
     showVpnBlocked();
   } else if (m.t === "protected_logout") {
     const oldName = String(m.name || "");
-    if (m.guest) myName = String(m.guest);
+    myName = null;
     savedNickApplied = false;
     joinedOnce = false;
     clearSavedPass();
@@ -6312,12 +6340,14 @@ function flushHistoryBuffer() {
   // only ever matches the same message (sender + timestamp), never a different
   // one that merely looks similar.
   for (const m of pending) {
-    if (m.t !== "chat" && m.t !== "img" && m.t !== "voice") continue;
+    if (m.t !== "chat" && m.t !== "img" && m.t !== "voice" && m.t !== "system") continue;
     if (alreadyRendered(roomMessagesEl, m)) continue;
-    if (isMine(m)) removeUploadPlaceholderForHost(roomMessagesEl);
-    stopTyping(m.from);
+    if (m.t !== "system") {
+      if (isMine(m)) removeUploadPlaceholderForHost(roomMessagesEl);
+      stopTyping(m.from);
+    }
     const wrap = addRoomMessageDom(m);
-    if (wrap) translateRealtimeMessage(m, wrap);
+    if (m.t !== "system" && wrap) translateRealtimeMessage(m, wrap);
   }
 }
 async function loadHistoryCore() {
@@ -6360,6 +6390,7 @@ async function loadHistoryCore() {
     console.error("load-initial-history", e);
   }
   historyLoading = false;
+  historyLoaded = true;
   showOlderLoader(false);
   flushHistoryBuffer();
   rehydrateReplyQuotesInDom(roomMessagesEl);
@@ -6412,7 +6443,7 @@ async function reloadChatHistoryAsync() {
 }
 
 function dmSend(payload) {
-  if (!socket || socket.readyState !== 1 || convo.mode !== "dm") return;
+  if (!interactionReady() || !socket || socket.readyState !== 1 || convo.mode !== "dm") return;
   const peer = convo.peer;
   socket.send(JSON.stringify(Object.assign({ t: "dm", to: peer }, payload)));
   // Every outgoing private message is also mirrored to Supabase, so the thread
@@ -6424,7 +6455,7 @@ function dmSend(payload) {
 
 let sendBtnHadFocus = false;
 function sendChat() {
-  if (!interactionReady()) { tacModal.classList.remove("hide"); return; }
+  if (!interactionReady()) { showNextOnboarding(); return; }
   const keepFocus = isDesktopPointer() || document.activeElement === msgInput || sendBtnHadFocus;
   sendBtnHadFocus = false;
   const text = msgInput.textContent.trim().slice(0, MAX_TEXT);
@@ -6467,6 +6498,7 @@ function sendChat() {
 }
 
 function sendTyping() {
+  if (!interactionReady()) return;
   const now = Date.now();
   if (now - lastTypingSent > 1500 && socket && socket.readyState === 1) {
     lastTypingSent = now;
@@ -6507,6 +6539,7 @@ function setComposeState() {
 }
 
 async function startRecording() {
+  if (!interactionReady()) { showNextOnboarding(); return; }
   closeEmojiPanel();
   closeGifPanel();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -6560,7 +6593,7 @@ function stopRecording() {
 
 async function sendVoice() {
   const blob = await stopRecording();
-  if (!blob || !blob.size || !socket || socket.readyState !== 1) return;
+  if (!interactionReady() || !blob || !blob.size || !socket || socket.readyState !== 1) return;
   const dur = Math.round(recElapsed * 10) / 10;
   const replySnap = replyToMsg ? Object.assign({}, replyToMsg) : null;
   const ph = addUploadPlaceholder("voice");
@@ -7055,6 +7088,7 @@ capInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); capSendBtn.click(); }
 });
 capSendBtn.addEventListener("click", async () => {
+  if (!interactionReady()) { showNextOnboarding(); return; }
   const blob = pendingImgBlob;
   const gifUrl = pendingGifUrl;
   if (!blob && !gifUrl) return;
@@ -8611,7 +8645,7 @@ let rxLpTimer = null, rxLpX = 0, rxLpY = 0;
 function rxKey(from, ts) { return String(from || "") + "|" + String(Number(ts) || 0); }
 function myRxId() {
   const n = String(myName || "").trim();
-  if (n && !/^Guest\d{4}$/i.test(n)) return "n:" + n.toLowerCase();
+  if (n) return "n:" + n.toLowerCase();
   return myUid ? "u:" + myUid : "";
 }
 function isMyRxEntry(who) {
@@ -8620,7 +8654,7 @@ function isMyRxEntry(who) {
   const me = myRxId();
   if (me && who === me) return true;
   const n = String(myName || "").trim().toLowerCase();
-  if (n && !/^guest\d{4}$/.test(n)) {
+  if (n) {
     if (who.slice(0, 2) === "n:" && who.slice(2).trim().toLowerCase() === n) return true;
     const known = rxWhoMap.get(who);
     if (known && known.trim().toLowerCase() === n) return true;
@@ -9548,7 +9582,7 @@ const ageYesBtn = document.getElementById("ageYesBtn");
 const ageNoBtn = document.getElementById("ageNoBtn");
 
 const gateOverlay = document.getElementById("gateOverlay");
-function interactionReady() { return ageApproved && tacAgreed && savedNickApplied; }
+function interactionReady() { return ageApproved && tacAgreed && savedNickApplied && !!myName; }
 function updateGate() {
   const ready = interactionReady();
   gateOverlay.classList.toggle("hide", ready);
