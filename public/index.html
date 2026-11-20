@@ -2522,6 +2522,8 @@
     z-index: 40;
     white-space: nowrap;
   }
+  #unreadChipBtn svg { transition: transform 0.18s ease; }
+  #unreadChipBtn.down svg { transform: rotate(180deg); }
   #unreadChipBtn:hover { background: #1f6499; }
   #unreadChipBtn:active { transform: translateX(-50%) scale(0.96); }
   #unreadChipBtn.hide { display: none; }

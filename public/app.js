@@ -195,6 +195,7 @@ function markSeen() {
   if (document.visibilityState === "hidden") return;
   if (convo.mode === "dm") { if (isNearBottom()) markDmRead(); return; }
   if (convo.mode !== "room") return;
+  if (Date.now() < bannerJumpUntil) return;
   if (isNearBottom()) clearUnreadState();
 }
 setInterval(markSeen, 5000);
@@ -500,17 +501,23 @@ const scrollDownBtn = document.getElementById("scrollDownBtn");
 function updateScrollBtn() {
   scrollDownBtn.classList.toggle("hide", scrollCtnEl.scrollHeight - scrollCtnEl.scrollTop - scrollCtnEl.clientHeight < 60);
 }
-scrollCtnEl.addEventListener("scroll", () => {
+roomScrollCtn.addEventListener("scroll", () => {
+  if (convo.mode !== "room") return;
   updateScrollBtn();
   const nb = isNearBottom();
-  if (!nb) userScrolledUp = true;
-  else if (userScrolledUp && (unreadCount || messagesEl.querySelector(".unreadBanner") || !unreadChipBtn.classList.contains("hide"))) {
+  if (!nb) {
+    userScrolledUp = true;
+    syncUnreadChipArrow();
+  } else if (document.visibilityState !== "hidden" && Date.now() >= bannerJumpUntil) {
     userScrolledUp = false;
-    clearUnreadState();
+    if (unreadCount || roomMessagesEl.querySelector(".unreadBanner") || !unreadChipBtn.classList.contains("hide")) {
+      clearUnreadState();
+    }
   }
 });
 let transDebounce = null;
-scrollCtnEl.addEventListener("scroll", () => {
+roomScrollCtn.addEventListener("scroll", () => {
+  if (convo.mode !== "room") return;
   maybeLoadOlder();
   if (translateOn) {
     clearTimeout(transDebounce);
@@ -539,16 +546,27 @@ scrollDownBtn.addEventListener("click", () => {
 const unreadChipBtn = document.getElementById("unreadChipBtn");
 let unreadCount = 0;
 let userScrolledUp = false;
+let bannerJumpUntil = 0;
+function maxMsgTsIn(host) {
+  let mx = 0;
+  if (!host) return 0;
+  for (const n of host.children) {
+    if (!n.classList || !n.classList.contains("msg") || n.dataset.placeholder === "1") continue;
+    const t = Number(n.dataset.ts) || 0;
+    if (t > mx) mx = t;
+  }
+  return mx;
+}
 function isNearBottom() {
   return scrollCtnEl.scrollHeight - scrollCtnEl.scrollTop - scrollCtnEl.clientHeight < 60;
 }
 function clearUnreadState() {
   unreadCount = 0;
   unreadChipBtn.classList.add("hide");
-  const b = roomMessagesEl.querySelector(".unreadBanner");
-  if (b) b.remove();
-  lastSeenAt = Date.now();
+  roomMessagesEl.querySelectorAll(".unreadBanner").forEach((b) => b.remove());
+  lastSeenAt = Math.max(lastSeenAt, Date.now(), maxMsgTsIn(roomMessagesEl));
   lsSet(lastSeenKey, String(lastSeenAt));
+  updateBackBadge();
   refreshListView();
 }
 function ensureUnreadBanner(wrap) {
@@ -561,16 +579,30 @@ function ensureUnreadBanner(wrap) {
   if (wrap) roomMessagesEl.insertBefore(banner, wrap);
   else roomMessagesEl.appendChild(banner);
 }
+function syncUnreadChipArrow() {
+  if (unreadChipBtn.classList.contains("hide") || convo.mode !== "room") return;
+  const b = roomMessagesEl.querySelector(".unreadBanner");
+  if (!b) { unreadChipBtn.classList.remove("down"); return; }
+  const ct = roomScrollCtn.getBoundingClientRect();
+  const r = b.getBoundingClientRect();
+  unreadChipBtn.classList.toggle("down", r.top > ct.top + ct.height * 0.55);
+}
 function showUnreadChip(count) {
+  if (convo.mode !== "room") return;
   document.getElementById("unreadChipLabel").textContent = count ? count + " unread" : "Unread messages";
   unreadChipBtn.classList.remove("hide");
+  requestAnimationFrame(syncUnreadChipArrow);
 }
 unreadChipBtn.addEventListener("click", () => {
+  if (convo.mode !== "room") { unreadChipBtn.classList.add("hide"); return; }
   unreadChipBtn.classList.add("hide");
+  bannerJumpUntil = Date.now() + 900;
   if (scrollToNewBanner(true)) {
-    setTimeout(() => { if (messagesEl.querySelector(".unreadBanner")) clearUnreadState(); }, 700);
+    setTimeout(() => {
+      if (convo.mode === "room" && isNearBottom()) clearUnreadState();
+    }, 650);
   } else {
-    scrollCtnEl.scrollTop = 0;
+    scrollBottom(true);
     clearUnreadState();
   }
 });
@@ -866,7 +898,9 @@ const dmUnreadMap = (() => {
 function saveDmUnread() { try { lsSet(DM_UNREAD_KEY, JSON.stringify(dmUnreadMap)); } catch (e) {} }
 function dmUnreadTotal() { let n = 0; for (const k of Object.keys(dmUnreadMap)) n += Number(dmUnreadMap[k]) || 0; return n; }
 function updateBackBadge() {
-  const n = dmAllowed() ? dmUnreadTotal() : 0;
+  const dmN = dmAllowed() ? dmUnreadTotal() : 0;
+  const roomN = convo.mode !== "room" ? Math.max(0, Number(unreadCount) || 0) : 0;
+  const n = dmN + roomN;
   backBadge.textContent = n > 99 ? "99+" : String(n);
   backBadge.classList.toggle("hide", n === 0);
 }
@@ -899,8 +933,8 @@ const dmScrollTops = new Map();           // peer -> scroll position when it was
 // draw a tick of its own inside a private thread, so it is suppressed there (see
 // the CSS) and this is the only tick source in a private chat.
 const DM_TICK_SENT_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5l4.5 4.5L19.5 6.5"/></svg>';
-const LIST_TICK_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 12.5l4 4L15 6.5"/><path d="M9.5 16.5l1 1L22 6.5"/></svg>';
-const DM_TICK_SEEN_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 12.5l4 4L15 6.5"/><path d="M9.5 16.5l1 1L22 6.5"/></svg>';
+const LIST_TICK_SVG = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="m1.75 9.75 2.5 2.5m3.5-4 2.5-2.5m-4.5 4 2.5 2.5 6-6.5"/></svg>';
+const DM_TICK_SEEN_SVG = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="m1.75 9.75 2.5 2.5m3.5-4 2.5-2.5m-4.5 4 2.5 2.5 6-6.5"/></svg>';
 
 function setRoomTitle(t) {
   roomTitleText = String(t || "");
@@ -1367,8 +1401,10 @@ async function refreshPeople() {
     if (Array.isArray(r)) {
       dmThreads = r.filter((t) => t && t.peer);
       for (const t of dmThreads) {
-        const u = Number(t.unread) || 0;
+        const viewingThisDm = convo.mode === "dm" && convo.peer === t.peer && document.visibilityState !== "hidden" && isNearBottom();
+        const u = viewingThisDm ? 0 : (Number(t.unread) || 0);
         if (u) dmUnreadMap[t.peer] = u; else delete dmUnreadMap[t.peer];
+        t.unread = u;
       }
       // Drop read marks whose conversation no longer exists (deleted on the
       // other side, wiped by a clear, or a peer who was un-verified), so a
@@ -1404,6 +1440,8 @@ function openPeople() {
   dmScrollEl.classList.add("hide");
   monitorScreen.classList.add("hide");
   composeBar.classList.add("hide");
+  unreadChipBtn.classList.add("hide");
+  scrollDownBtn.classList.add("hide");
   closeEmojiPanel();
   closeGifPanel();
   applyHeader();
@@ -1413,7 +1451,7 @@ function openPeople() {
   startPeopleTimer();
 }
 
-function showRoom() {
+async function showRoom() {
   stickyHideNow();
   if (selectionMode) endSelection();
   leaveDm();
@@ -1430,16 +1468,22 @@ function showRoom() {
   syncComposeH();
   retargetTailObserver();
   applyHeader();
-  if (roomHistoryStale) { roomHistoryStale = false; reloadChatHistory(); }
-  unreadCount = addNewMsgsBanner();
+  if (roomHistoryStale) { roomHistoryStale = false; await reloadChatHistory(); }
+  if (convo.mode !== "room") return;
+  const computedUnread = addNewMsgsBanner();
+  if (computedUnread > 0 || lastSeenAt > 0) unreadCount = computedUnread;
   if (unreadCount) {
+    bannerJumpUntil = Date.now() + 900;
     showUnreadChip(unreadCount);
     if (!scrollToNewBanner(false)) scrollBottom(true);
+    requestAnimationFrame(syncUnreadChipArrow);
   } else {
+    unreadChipBtn.classList.add("hide");
     scrollBottom(true);
   }
+  updateBackBadge();
   refreshListView();
-  if (interactionReady()) msgInput.focus();
+  if (interactionReady() && isDesktopPointer()) msgInput.focus();
 }
 
 // Park the open thread (DOM included) so coming back is instant and keeps its
@@ -1484,6 +1528,7 @@ async function openDm(name) {
   monitorScreen.classList.add("hide");
   dmScrollEl.classList.remove("hide");
   composeBar.classList.remove("hide");
+  unreadChipBtn.classList.add("hide");
   syncComposeH();
   retargetTailObserver();
   dmPeerRead = 0;
@@ -1501,6 +1546,7 @@ async function openDm(name) {
     dmMessagesEl.appendChild(el("div", "pEmpty", "Loading\u2026"));
   }
   delete dmUnreadMap[peer];
+  for (const t of dmThreads) if (t.peer === peer) t.unread = 0;
   saveDmUnread();
   updateBackBadge();
   // After the unread bookkeeping, so the list shows the row as active and
@@ -1525,7 +1571,7 @@ async function openDm(name) {
   // Translate the just-opened thread (with translation on, the loaded history
   // would otherwise stay untranslated until the next scroll).
   if (translateOn) translateViewport();
-  if (interactionReady()) msgInput.focus();
+  if (interactionReady() && isDesktopPointer()) msgInput.focus();
 }
 
 // "Seen" is derived, never stored on the bubble: the other side's read mark is
@@ -1559,14 +1605,15 @@ function markDmRead(force) {
   if (convo.mode !== "dm") return;
   if (dmUnreadMap[convo.peer]) {
     delete dmUnreadMap[convo.peer];
+    for (const t of dmThreads) if (t.peer === convo.peer) t.unread = 0;
     saveDmUnread();
     updateBackBadge();
     refreshListView();
   }
   if (!socket || socket.readyState !== 1) return;
-  const now = Date.now();
-  if (!force && now - dmReadSentAt < 1500) return;
-  dmReadSentAt = now;
+  const now = Math.max(Date.now(), maxMsgTsIn(dmMessagesEl));
+  if (!force && Date.now() - dmReadSentAt < 1500) return;
+  dmReadSentAt = Date.now();
   try { socket.send(JSON.stringify({ t: "dm", to: convo.peer, ev: "read", ts: now })); } catch (e) {}
 }
 
@@ -1639,21 +1686,28 @@ function handleDm(m) {
   if (!m.ev) m.t = m.sub === "img" ? "img" : m.sub === "voice" ? "voice" : "chat";
   if (alreadyRendered(host, m)) return;
   const mine = isMine(m);
+  const wasNearBottom = active && isNearBottom();
+  const tabVisible = document.visibilityState !== "hidden";
   if (m.replyTo && m.replyTo.from) replyKvNote(m.replyTo);
   if (active) {
+    if (mine) removeUploadPlaceholderForHost(dmMessagesEl);
     const wrap = addMessageDom(m);
     translateRealtimeMessage(m, wrap);
-    if (mine && uploadPlaceholders.length) removeUploadPlaceholder(uploadPlaceholders[0]);
     if (!mine) stopTyping(peer);
-    if (!mine && document.visibilityState !== "hidden") playNotify();
+    if (!mine && tabVisible) playNotify();
     showMessageNotification(m);
-    if (mine) { scrollBottom(); applyDmSeen(); }
-    else if (isNearBottom()) { scrollBottom(true); markDmRead(); }
+    if (mine) { scrollBottom(true); applyDmSeen(); }
+    else if (wasNearBottom && tabVisible) { scrollBottom(true); markDmRead(true); }
     else updateScrollBtn();
   } else if (host) {
-    withMsgHost(host, () => addMessageDom(m));
+    withMsgHost(host, () => {
+      stripEmptyHint(host);
+      if (mine) removeUploadPlaceholderForHost(host);
+      addMessageDom(m);
+      updateBubbleTails();
+    });
   }
-  const viewingNow = active && document.visibilityState !== "hidden" && isNearBottom();
+  const viewingNow = active && tabVisible && wasNearBottom;
   if (!mine) {
     if (!active) playNotify();
     if (viewingNow) updateDmThreadPreview(peer, m);
@@ -2131,6 +2185,7 @@ function lastMessageFrom() {
   const kids = [...messagesEl.children];
   for (let i = kids.length - 1; i >= 0; i--) {
     const n = kids[i];
+    if (n.dataset && n.dataset.placeholder === "1") continue;
     if (n.classList.contains("msg")) return n.dataset.from || null;
     if (n.classList.contains("sys") || n.classList.contains("sep")) return null;
   }
@@ -3350,7 +3405,9 @@ replyCloseBtn.addEventListener("click", clearReply);
 replyQuoteBox.addEventListener("click", () => scrollToMsgId(replyToMsg));
 
 function addUploadPlaceholder(kind, payload) {
+  const host = messagesEl;
   const wrap = el("div", "msg out");
+  wrap.dataset.placeholder = "1";
   const bubble = el("div", "bubble uploadBubble");
   if (kind === "text") {
     bubble.classList.remove("uploadBubble");
@@ -3371,10 +3428,10 @@ function addUploadPlaceholder(kind, payload) {
     bubble.appendChild(ts);
     try { applyAuthorOutline(bubble, myName); } catch (e) {}
     wrap.appendChild(bubble);
-    stripEmptyHint(messagesEl);
-    messagesEl.appendChild(wrap);
-    scrollBottom();
-    const tph = { wrap, done: false };
+    stripEmptyHint(host);
+    host.appendChild(wrap);
+    scrollBottom(true);
+    const tph = { wrap, host, done: false };
     uploadPlaceholders.push(tph);
     setTimeout(() => removeUploadPlaceholder(tph), 8000);
     return tph;
@@ -3410,10 +3467,10 @@ function addUploadPlaceholder(kind, payload) {
   up.appendChild(document.createTextNode(kind === "text" ? "Sending…" : "Uploading…"));
   bubble.appendChild(up);
   wrap.appendChild(bubble);
-  stripEmptyHint(messagesEl);
-  messagesEl.appendChild(wrap);
-  scrollBottom();
-  const ph = { wrap, done: false };
+  stripEmptyHint(host);
+  host.appendChild(wrap);
+  scrollBottom(true);
+  const ph = { wrap, host, done: false };
   uploadPlaceholders.push(ph);
   if (kind === "text") {
     setTimeout(() => removeUploadPlaceholder(ph), 8000);
@@ -3427,6 +3484,10 @@ function removeUploadPlaceholder(ph) {
   const i = uploadPlaceholders.indexOf(ph);
   if (i !== -1) uploadPlaceholders.splice(i, 1);
   ph.wrap.remove();
+}
+function removeUploadPlaceholderForHost(host) {
+  const ph = uploadPlaceholders.find((p) => !p.done && (!host || !p.host || p.host === host));
+  if (ph) removeUploadPlaceholder(ph);
 }
 
 async function downloadImage(url, name) {
@@ -4016,6 +4077,8 @@ async function openMonitorThread(t) {
   dmScrollEl.classList.add("hide");
   monitorScreen.classList.remove("hide");
   composeBar.classList.add("hide");
+  unreadChipBtn.classList.add("hide");
+  scrollDownBtn.classList.add("hide");
   closeEmojiPanel();
   closeGifPanel();
   retargetTailObserver();
@@ -4569,18 +4632,24 @@ function refreshDaySeps() {
   for (const n of [...messagesEl.children]) {
     if (!n.classList || !n.classList.contains("sep")) continue;
     n.classList.add("daySep");
-    const next = n.nextElementSibling;
+    let next = n.nextElementSibling;
+    while (next && next.classList.contains("unreadBanner")) next = next.nextElementSibling;
     const want = next && anchors.get(next);
     if (!want) n.remove();
     else if (n.textContent !== want) n.textContent = want;
   }
   // … then give every anchor one if it is missing.
   for (const [node, label] of anchors) {
-    const prev = node.previousElementSibling;
+    let target = node;
+    let prev = target.previousElementSibling;
+    while (prev && prev.classList.contains("unreadBanner")) {
+      target = prev;
+      prev = target.previousElementSibling;
+    }
     if (prev && prev.classList.contains("sep")) continue;
     const s = el("div", "sep daySep");
     s.textContent = label;
-    messagesEl.insertBefore(s, node);
+    messagesEl.insertBefore(s, target);
   }
 }
 
@@ -4901,10 +4970,19 @@ function stopTyping(name) {
 const UNREAD_CHEV = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
 
 function addNewMsgsBanner() {
-  if (!lastSeenAt) return 0;
+  roomMessagesEl.querySelectorAll(".unreadBanner").forEach((b) => b.remove());
+  if (!lastSeenAt) {
+    const latest = maxMsgTsIn(roomMessagesEl);
+    if (latest) {
+      lastSeenAt = Math.max(Date.now(), latest);
+      lsSet(lastSeenKey, String(lastSeenAt));
+    }
+    return 0;
+  }
   let count = 0;
   let firstNew = null;
   for (const n of roomMessagesEl.children) {
+    if (!n.classList || !n.classList.contains("msg") || n.classList.contains("out") || n.dataset.placeholder === "1") continue;
     if (n.dataset && n.dataset.ts && Number(n.dataset.ts) > lastSeenAt) {
       count++;
       if (!firstNew) firstNew = n;
@@ -5050,33 +5128,36 @@ function handleMessage(m) {
     // machinery only runs while it is the one on screen.
     const atRoom = convo.mode === "room";
     const wasNearBottom = atRoom && isNearBottom();
+    const tabVisible = document.visibilityState !== "hidden";
     const mine = isMine(m);
     if (m.t !== "system" && m.replyTo && m.replyTo.from) replyKvNote(m.replyTo);
+    if ((m.t === "chat" || m.t === "img" || m.t === "voice") && mine) {
+      removeUploadPlaceholderForHost(roomMessagesEl);
+    }
     const wrap = atRoom ? addMessageDom(m) : withMsgHost(roomMessagesEl, () => addMessageDom(m));
     if (m.t !== "system" && wrap) translateRealtimeMessage(m, wrap);
     if (m.t !== "system" && m.from && !mine && atRoom) playNotify();
     showMessageNotification(m);
-    if ((m.t === "chat" || m.t === "img" || m.t === "voice") && mine && uploadPlaceholders.length) {
-      removeUploadPlaceholder(uploadPlaceholders[0]);
-    }
     if (m.t === "chat" || m.t === "img" || m.t === "voice") stopTyping(m.from);
     if (m.t === "chat" || m.t === "img" || m.t === "voice") {
       if (!atRoom) {
         if (!mine) {
           unreadCount++;
           ensureUnreadBanner(wrap);
+          updateBackBadge();
         }
         updateScrollBtn();
       } else if (mine) {
-        scrollBottom();
-        if (wasNearBottom) clearUnreadState();
-      } else if (wasNearBottom) {
+        scrollBottom(true);
+        clearUnreadState();
+      } else if (wasNearBottom && tabVisible) {
         scrollBottom(true);
         clearUnreadState();
       } else {
         unreadCount++;
         ensureUnreadBanner(wrap);
         showUnreadChip(unreadCount);
+        updateScrollBtn();
       }
     } else if (atRoom) {
       scrollBottom();
@@ -5870,6 +5951,8 @@ function flushHistoryBuffer() {
   for (const m of pending) {
     if (m.t !== "chat" && m.t !== "img" && m.t !== "voice") continue;
     if (alreadyRendered(roomMessagesEl, m)) continue;
+    if (isMine(m)) removeUploadPlaceholderForHost(roomMessagesEl);
+    stopTyping(m.from);
     const wrap = addRoomMessageDom(m);
     if (wrap) translateRealtimeMessage(m, wrap);
   }
@@ -6205,7 +6288,14 @@ function silentAutoLoginRetry(s, loc, delay) {
 }
 window.addEventListener("pageshow", (e) => { if (e.persisted) forceCleanReconnect(); });
 window.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && socket && socket.readyState !== 1 && !socket._reconnectDone) scheduleReconnect(socket);
+  if (document.visibilityState === "visible") {
+    if (socket && socket.readyState !== 1 && !socket._reconnectDone) scheduleReconnect(socket);
+    if (convo.mode === "dm" && isNearBottom()) markDmRead(true);
+    else if (convo.mode === "room" && unreadCount) {
+      bannerJumpUntil = Date.now() + 2000;
+      syncUnreadChipArrow();
+    }
+  }
 });
 
 let myLocPromise = null;
@@ -6447,11 +6537,16 @@ function connect() {  // Exactly one live socket at a time. A reconnect replaces
     } catch (e) {}
     unreadCount = addNewMsgsBanner();
     if (unreadCount) {
-      showUnreadChip(unreadCount);
-      if (!historySoftRejoin && !scrollToNewBanner(false)) scrollBottom(true);
-    } else if (!historySoftRejoin) {
+      bannerJumpUntil = Date.now() + 1200;
+      if (convo.mode === "room") {
+        showUnreadChip(unreadCount);
+        if (!historySoftRejoin && !scrollToNewBanner(false)) scrollBottom(true);
+        requestAnimationFrame(syncUnreadChipArrow);
+      }
+    } else if (!historySoftRejoin && convo.mode === "room") {
       scrollBottom(true);
     }
+    updateBackBadge();
     refreshListView();
     historySoftRejoin = false;
     if (interactionReady() && isDesktopPointer()) msgInput.focus();

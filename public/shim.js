@@ -586,7 +586,19 @@ SupaSocket.prototype._dmSend = function (m) {
   if (!to || to === self._myName) return;
   var now = Date.now();
   if (m.ev === "read") {
-    self._inboxSend(to, { t: "dm", peer: self._myName, ev: "read", ts: now });
+    var readTs = Math.max(now, Number(m.ts) || 0);
+    var rk = self._myName + "\0" + to;
+    if (!SupaSocket._dmReadsLocal) SupaSocket._dmReadsLocal = {};
+    SupaSocket._dmReadsLocal[rk] = Math.max(Number(SupaSocket._dmReadsLocal[rk]) || 0, readTs);
+    metaGet("dm_reads", {}).then(function (cur) {
+      var obj = (cur && typeof cur === "object" && !Array.isArray(cur)) ? Object.assign({}, cur) : {};
+      var prev = Number(obj[rk]) || 0;
+      if (readTs > prev) {
+        obj[rk] = readTs;
+        metaSet("dm_reads", obj);
+      }
+    }).catch(function () {});
+    self._inboxSend(to, { t: "dm", peer: self._myName, ev: "read", ts: readTs });
     return;
   }
   if (m.ev === "typing") {
@@ -1006,15 +1018,18 @@ SupaSocket.prototype.rpc.logoutProtected = function () {
 };
 function dmPreview(m) {
   if (!m) return "";
+  if (m.t === "voice") return "Voice message";
   if (m.text) return String(m.text).slice(0, 80);
   if (m.caption) return String(m.caption).slice(0, 80);
-  if (m.url) return "[photo]";
+  if (m.url) return "Photo";
   return "";
 }
 SupaSocket.prototype._dmThreads = function () {
   var self = this;
-  return Promise.all([dmRowsAll(), metaGet("verified", [])]).then(function (r) {
+  return Promise.all([dmRowsAll(), metaGet("verified", []), metaGet("dm_reads", {})]).then(function (r) {
     var rows = r[0], verified = Array.isArray(r[1]) ? r[1] : [];
+    var reads = (r[2] && typeof r[2] === "object" && !Array.isArray(r[2])) ? r[2] : {};
+    var localReads = SupaSocket._dmReadsLocal || {};
     var me = self._myName;
     var mine = (me === ADMIN_NAME) || verified.indexOf(me) !== -1;
     if (!me || !mine) return [];
@@ -1034,7 +1049,22 @@ SupaSocket.prototype._dmThreads = function () {
       g.rows.sort(function (a, b) { return Number(a.ts) - Number(b.ts); });
       var lastRow = g.rows[g.rows.length - 1];
       var last = dmRowToMsg(lastRow).msg;
-      out.push({ peer: g.peer, ts: Number(lastRow.ts) || 0, unread: 0, from: lastRow.sender, preview: dmPreview(last), read: 0 });
+      var lastMyTs = 0;
+      for (var j = 0; j < g.rows.length; j++) {
+        if (g.rows[j].sender === me) {
+          var rts = Number(g.rows[j].ts) || 0;
+          if (rts > lastMyTs) lastMyTs = rts;
+        }
+      }
+      var myKey = me + "\0" + g.peer;
+      var peerKey = g.peer + "\0" + me;
+      var myRead = Math.max(Number(reads[myKey]) || 0, Number(localReads[myKey]) || 0, lastMyTs);
+      var peerRead = Math.max(Number(reads[peerKey]) || 0, Number(localReads[peerKey]) || 0);
+      var unread = 0;
+      for (var u = 0; u < g.rows.length; u++) {
+        if (g.rows[u].sender === g.peer && (Number(g.rows[u].ts) || 0) > myRead) unread++;
+      }
+      out.push({ peer: g.peer, ts: Number(lastRow.ts) || 0, unread: unread, from: lastRow.sender, preview: dmPreview(last), read: peerRead });
     }
     out.sort(function (a, b) { return b.ts - a.ts; });
     return out;
@@ -1050,10 +1080,17 @@ SupaSocket.prototype.rpc.getDm = function (data) {
   peer = peer.trim().slice(0, 20);
   if (!peer || peer === self._myName) return Promise.resolve("{}");
   return self._dmPairKey(self._myName, peer).then(function (key) {
-    return restJson("messages?select=id,ts,sender,type,text,url,dur,size,reply_to&type=eq." + key + "&order=ts.asc&limit=5000").then(function (rows) {
-      rows = Array.isArray(rows) ? rows : [];
+    return Promise.all([
+      restJson("messages?select=id,ts,sender,type,text,url,dur,size,reply_to&type=eq." + key + "&order=ts.asc&limit=5000"),
+      metaGet("dm_reads", {})
+    ]).then(function (res) {
+      var rows = Array.isArray(res[0]) ? res[0] : [];
+      var reads = (res[1] && typeof res[1] === "object" && !Array.isArray(res[1])) ? res[1] : {};
+      var localReads = SupaSocket._dmReadsLocal || {};
+      var peerKey = peer + "\0" + self._myName;
+      var peerRead = Math.max(Number(reads[peerKey]) || 0, Number(localReads[peerKey]) || 0);
       var msgs = rows.map(function (row) { return dmRowToMsg(row).msg; });
-      return JSON.stringify({ peer: peer, msgs: msgs, read: 0 });
+      return JSON.stringify({ peer: peer, msgs: msgs, read: peerRead });
     });
   }).catch(function () { return "{}"; });
 };
