@@ -933,7 +933,7 @@ const dmScrollTops = new Map();           // peer -> scroll position when it was
 // once the other side's read mark passes it. The room's own `.tsCheck` would
 // draw a tick of its own inside a private thread, so it is suppressed there (see
 // the CSS) and this is the only tick source in a private chat.
-const DM_TICK_SENT_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5l4.5 4.5L19.5 6.5"/></svg>';
+const DM_TICK_SENT_SVG = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="m3.5 9.25 2.75 2.75 6.25-6.75"/></svg>';
 const LIST_TICK_SVG = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="m1.75 9.75 2.5 2.5m3.5-4 2.5-2.5m-4.5 4 2.5 2.5 6-6.5"/></svg>';
 const DM_TICK_SEEN_SVG = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="m1.75 9.75 2.5 2.5m3.5-4 2.5-2.5m-4.5 4 2.5 2.5 6-6.5"/></svg>';
 
@@ -1532,7 +1532,8 @@ async function openDm(name) {
   unreadChipBtn.classList.add("hide");
   syncComposeH();
   retargetTailObserver();
-  dmPeerRead = 0;
+  const knownThread = dmThreads.find((x) => x.peer === peer);
+  dmPeerRead = Number((knownThread && knownThread.read) || 0);
   applyHeader();
   const hold = dmDom.get(peer);
   const cached = !!(hold && hold.childNodes.length);
@@ -1558,11 +1559,15 @@ async function openDm(name) {
   try { r = JSON.parse(await socket.rpc.getDm(JSON.stringify({ peer }))); } catch (e) {}
   if (convo.mode !== "dm" || convo.peer !== peer) return;
   const msgs = (r && Array.isArray(r.msgs)) ? r.msgs : [];
-  dmPeerRead = Number((r && r.read) || 0);
+  dmPeerRead = Math.max(dmPeerRead, Number((r && r.read) || 0));
   // The server only hands back the newest DM_MSGS_MAX messages; the Supabase
   // mirror holds everything, so merge the older half back in front of them.
   const full = await dmHistoryWithSupabase(peer, msgs);
   if (convo.mode !== "dm" || convo.peer !== peer) return;
+  for (const mm of full) {
+    if (mm && mm.from === peer) dmPeerRead = Math.max(dmPeerRead, Number(mm.ts) || 0);
+  }
+  if (knownThread) knownThread.read = Math.max(Number(knownThread.read) || 0, dmPeerRead);
   sbDmBackfill(peer, msgs);
   const painted = dmMessagesEl.querySelectorAll(".msg").length;
   if (!cached || painted !== full.length) renderDmThread(full);
@@ -1598,7 +1603,7 @@ function paintDmTick(wrap, readMark) {
   if (tick.dataset.state === state) return;
   tick.dataset.state = state;
   tick.classList.toggle("seen", seen);
-  tick.innerHTML = seen ? DM_TICK_SEEN_SVG : CLOCK_SVG;
+  tick.innerHTML = seen ? DM_TICK_SEEN_SVG : DM_TICK_SENT_SVG;
   tick.title = seen ? "Read" : "Sent";
 }
 
@@ -1654,8 +1659,11 @@ function handleDm(m) {
   // relay anything else, and this keeps the client's own state consistent.
   if (!canDm(peer)) return;
   if (m.ev === "read") {
+    const rts = Number(m.ts) || 0;
+    const th = dmThreads.find((x) => x.peer === peer);
+    if (th && rts > (Number(th.read) || 0)) { th.read = rts; refreshListView(); }
     if (convo.mode === "dm" && convo.peer === peer) {
-      dmPeerRead = Math.max(dmPeerRead, Number(m.ts) || 0);
+      dmPeerRead = Math.max(dmPeerRead, rts);
       applyDmSeen();
     }
     return;
@@ -1710,6 +1718,10 @@ function handleDm(m) {
   }
   const viewingNow = active && tabVisible && wasNearBottom;
   if (!mine) {
+    const mts = Number(m.ts) || 0;
+    const th = dmThreads.find((x) => x.peer === peer);
+    if (th && mts > (Number(th.read) || 0)) th.read = mts;
+    if (active && mts > dmPeerRead) { dmPeerRead = mts; applyDmSeen(); }
     if (!active) playNotify();
     if (viewingNow) updateDmThreadPreview(peer, m);
     else bumpDmUnread(peer, m);

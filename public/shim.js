@@ -659,6 +659,15 @@ SupaSocket.prototype._dmPairKey = function (a, b) {
   var x = a < b ? a : b, y = a < b ? b : a;
   return sha256Hex(x + "\0" + y).then(function (h) { return "dm." + h.slice(0, 32); });
 };
+function dmReadKey(reader, peer) {
+  return String(reader || "").trim().toLowerCase() + "||" + String(peer || "").trim().toLowerCase();
+}
+function dmReadVal(map, reader, peer) {
+  if (!map || typeof map !== "object") return 0;
+  var k1 = dmReadKey(reader, peer);
+  var k2 = String(reader || "") + "||" + String(peer || "");
+  return Math.max(Number(map[k1]) || 0, Number(map[k2]) || 0);
+}
 SupaSocket.prototype._dmSend = function (m) {
   var self = this;
   var to = String(m.to || "").trim().slice(0, 20);
@@ -666,11 +675,16 @@ SupaSocket.prototype._dmSend = function (m) {
   var now = Date.now();
   if (m.ev === "read") {
     var readTs = Math.max(now, Number(m.ts) || 0);
-    var rk = self._myName + "\0" + to;
+    var rk = dmReadKey(self._myName, to);
     if (!SupaSocket._dmReadsLocal) SupaSocket._dmReadsLocal = {};
     SupaSocket._dmReadsLocal[rk] = Math.max(Number(SupaSocket._dmReadsLocal[rk]) || 0, readTs);
     metaGet("dm_reads", {}).then(function (cur) {
-      var obj = (cur && typeof cur === "object" && !Array.isArray(cur)) ? Object.assign({}, cur) : {};
+      var obj = {};
+      if (cur && typeof cur === "object" && !Array.isArray(cur)) {
+        for (var ck in cur) {
+          if (ck.indexOf("\0") === -1) obj[ck] = cur[ck];
+        }
+      }
       var prev = Number(obj[rk]) || 0;
       if (readTs > prev) {
         obj[rk] = readTs;
@@ -1224,17 +1238,17 @@ SupaSocket.prototype._dmThreads = function () {
       g.rows.sort(function (a, b) { return Number(a.ts) - Number(b.ts); });
       var lastRow = g.rows[g.rows.length - 1];
       var last = dmRowToMsg(lastRow).msg;
-      var lastMyTs = 0;
+      var lastMyTs = 0, lastPeerTs = 0;
       for (var j = 0; j < g.rows.length; j++) {
+        var rts = Number(g.rows[j].ts) || 0;
         if (g.rows[j].sender === me) {
-          var rts = Number(g.rows[j].ts) || 0;
           if (rts > lastMyTs) lastMyTs = rts;
+        } else if (g.rows[j].sender === g.peer) {
+          if (rts > lastPeerTs) lastPeerTs = rts;
         }
       }
-      var myKey = me + "\0" + g.peer;
-      var peerKey = g.peer + "\0" + me;
-      var myRead = Math.max(Number(reads[myKey]) || 0, Number(localReads[myKey]) || 0, lastMyTs);
-      var peerRead = Math.max(Number(reads[peerKey]) || 0, Number(localReads[peerKey]) || 0);
+      var myRead = Math.max(dmReadVal(reads, me, g.peer), dmReadVal(localReads, me, g.peer), lastMyTs);
+      var peerRead = Math.max(dmReadVal(reads, g.peer, me), dmReadVal(localReads, g.peer, me), lastPeerTs);
       var unread = 0;
       for (var u = 0; u < g.rows.length; u++) {
         if (g.rows[u].sender === g.peer && (Number(g.rows[u].ts) || 0) > myRead) unread++;
@@ -1262,8 +1276,14 @@ SupaSocket.prototype.rpc.getDm = function (data) {
       var rows = Array.isArray(res[0]) ? res[0] : [];
       var reads = (res[1] && typeof res[1] === "object" && !Array.isArray(res[1])) ? res[1] : {};
       var localReads = SupaSocket._dmReadsLocal || {};
-      var peerKey = peer + "\0" + self._myName;
-      var peerRead = Math.max(Number(reads[peerKey]) || 0, Number(localReads[peerKey]) || 0);
+      var lastPeerTs = 0;
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].sender === peer) {
+          var rts = Number(rows[i].ts) || 0;
+          if (rts > lastPeerTs) lastPeerTs = rts;
+        }
+      }
+      var peerRead = Math.max(dmReadVal(reads, peer, self._myName), dmReadVal(localReads, peer, self._myName), lastPeerTs);
       var msgs = rows.map(function (row) { return dmRowToMsg(row).msg; });
       return JSON.stringify({ peer: peer, msgs: msgs, read: peerRead });
     });
