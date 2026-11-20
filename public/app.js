@@ -1402,6 +1402,8 @@ function openPeople() {
   dmScrollEl.classList.add("hide");
   monitorScreen.classList.add("hide");
   composeBar.classList.add("hide");
+  closeEmojiPanel();
+  closeGifPanel();
   applyHeader();
   renderPeopleList();
   requestAnimationFrame(() => syncFolderIndicator(false));
@@ -4008,6 +4010,8 @@ async function openMonitorThread(t) {
   dmScrollEl.classList.add("hide");
   monitorScreen.classList.remove("hide");
   composeBar.classList.add("hide");
+  closeEmojiPanel();
+  closeGifPanel();
   retargetTailObserver();
   applyHeader();
   renderMonitorThread();
@@ -5999,8 +6003,10 @@ function sendChat() {
   clearReply();
   hideMentionPop();
   msgInput.textContent = "";
+  msgSelRange = null;
   updateSendBtn();
   closeEmojiPanel();
+  closeGifPanel();
   msgInput.focus();
 }
 
@@ -6046,6 +6052,7 @@ function setComposeState() {
 
 async function startRecording() {
   closeEmojiPanel();
+  closeGifPanel();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     toast("Voice recording isn't supported in this browser");
     return;
@@ -6467,6 +6474,7 @@ msgInput.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+  else if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); insertTextAtCaret("\n"); }
 });
 msgInput.addEventListener("input", () => { normalizeMsgInput(); updateSendBtn(); sendTyping(); updateMentionPopup(); });
 msgInput.addEventListener("keyup", saveMsgSelection);
@@ -6653,8 +6661,18 @@ function saveRecents() { try { lsSet(recentsKey, JSON.stringify(emojiRecents)); 
 
 let activeCat = emojiRecents.length ? "recents" : "smileys";
 
+let emojiTabListEl = null;
+let emojiBackTimer = null;
+let emojiBackInterval = null;
+function stopEmojiBackRepeat() {
+  if (emojiBackTimer) { clearTimeout(emojiBackTimer); emojiBackTimer = null; }
+  if (emojiBackInterval) { clearInterval(emojiBackInterval); emojiBackInterval = null; }
+}
+
 function renderEmojiTabs() {
   emojiTabsEl.innerHTML = "";
+  emojiTabListEl = document.createElement("div");
+  emojiTabListEl.id = "emojiTabList";
   for (const cat of EMOJI_CATS) {
     const b = document.createElement("button");
     b.type = "button";
@@ -6662,15 +6680,43 @@ function renderEmojiTabs() {
     b.dataset.cat = cat.id;
     b.title = cat.name;
     b.textContent = cat.icon;
+    b.addEventListener("mousedown", (e) => e.preventDefault());
     b.addEventListener("click", (e) => { e.stopPropagation(); switchEmojiCat(cat.id); });
-    emojiTabsEl.appendChild(b);
+    emojiTabListEl.appendChild(b);
   }
+  emojiTabsEl.appendChild(emojiTabListEl);
+  const bb = document.createElement("button");
+  bb.type = "button";
+  bb.id = "emojiBackBtn";
+  bb.className = "emojiBack";
+  bb.title = "Backspace";
+  bb.setAttribute("aria-label", "Backspace");
+  bb.innerHTML = BACKSPACE_SVG;
+  bb.addEventListener("mousedown", (e) => e.preventDefault());
+  bb.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+    stopEmojiBackRepeat();
+    backspaceEmoji();
+    emojiBackTimer = setTimeout(() => {
+      emojiBackInterval = setInterval(backspaceEmoji, 65);
+    }, 380);
+  });
+  bb.addEventListener("pointerup", stopEmojiBackRepeat);
+  bb.addEventListener("pointerleave", stopEmojiBackRepeat);
+  bb.addEventListener("pointercancel", stopEmojiBackRepeat);
+  bb.addEventListener("click", (e) => e.stopPropagation());
+  emojiTabsEl.appendChild(bb);
 }
 
 let _emojiSeg = null;
 function splitEmojis(str) {
-  if (!_emojiSeg) _emojiSeg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-  return Array.from(_emojiSeg.segment(str), s => s.segment);
+  const s = String(str || "");
+  if (!s) return [];
+  if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
+    if (!_emojiSeg) _emojiSeg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    return Array.from(_emojiSeg.segment(s), seg => seg.segment);
+  }
+  return Array.from(s);
 }
 
 const BACKSPACE_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 5H9l-7 7 7 7h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z"/><path d="M12 9.5l5 5M17 9.5l-5 5"/></svg>';
@@ -6682,14 +6728,6 @@ function addEmojiSection(title, ems, empty) {
   t.className = "emojiCatTitle";
   t.textContent = title;
   head.appendChild(t);
-  const bb = document.createElement("button");
-  bb.type = "button";
-  bb.className = "emojiBack";
-  bb.title = "Backspace";
-  bb.setAttribute("aria-label", "Backspace");
-  bb.innerHTML = BACKSPACE_SVG;
-  bb.addEventListener("click", (e) => { e.stopPropagation(); backspaceEmoji(); });
-  head.appendChild(bb);
   emojiGridEl.appendChild(head);
   if (empty) {
     const e = document.createElement("div");
@@ -6703,6 +6741,7 @@ function addEmojiSection(title, ems, empty) {
     c.type = "button";
     c.className = "emojiCell";
     c.textContent = em;
+    c.addEventListener("mousedown", (e) => e.preventDefault());
     c.addEventListener("click", (e) => { e.stopPropagation(); insertEmoji(em); });
     emojiGridEl.appendChild(c);
   }
@@ -6724,7 +6763,8 @@ function renderEmojiGrid(catId) {
 
 function switchEmojiCat(catId) {
   activeCat = catId;
-  for (const t of emojiTabsEl.children) t.classList.toggle("active", t.dataset.cat === catId);
+  const list = emojiTabListEl ? emojiTabListEl.children : emojiTabsEl.children;
+  for (const t of list) t.classList.toggle("active", t.dataset.cat === catId);
   renderEmojiGrid(catId);
   emojiScroll.scrollTop = 0;
 }
@@ -6742,44 +6782,100 @@ function saveMsgSelection() {
 }
 
 function normalizeMsgInput() {
+  // Collapse any browser-injected <br>/<div> blocks into plain text newlines so
+  // caret offset math, formatting, and sendChat() never drop line breaks.
+  if (msgInput.querySelector("br, div, p")) {
+    const raw = (msgInput.innerText || "").replace(/\r\n?/g, "\n");
+    if (!raw.trim()) {
+      msgInput.textContent = "";
+      msgSelRange = null;
+      return;
+    }
+    const clean = raw.slice(0, MAX_TEXT);
+    msgInput.textContent = clean;
+    if (document.activeElement === msgInput) setCaretInInput(clean.length);
+    else msgSelRange = null;
+    return;
+  }
   const t = msgInput.textContent;
-  if (!t.trim()) { msgInput.textContent = ""; return; }
+  if (!t.trim()) {
+    if (msgInput.childNodes.length) msgInput.textContent = "";
+    msgSelRange = null;
+    return;
+  }
   if (t.length > MAX_TEXT) {
     msgInput.textContent = t.slice(0, MAX_TEXT);
-    const sel = window.getSelection();
     const range = document.createRange();
     range.selectNodeContents(msgInput);
     range.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(range);
+    if (document.activeElement === msgInput) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
     msgSelRange = range.cloneRange();
   }
 }
 
-function insertTextAtCaret(text) {
+function currentInputOffsets() {
   const focused = document.activeElement === msgInput;
   const sel = window.getSelection();
   let range = null;
   if (focused && sel && sel.rangeCount) {
     const r = sel.getRangeAt(0);
-    if (msgInput.contains(r.startContainer)) range = r;
+    if (msgInput.contains(r.startContainer) && msgInput.contains(r.endContainer)) range = r;
   }
-  if (!range && msgSelRange && msgInput.contains(msgSelRange.startContainer)) range = msgSelRange.cloneRange();
-  if (!range) {
-    range = document.createRange();
+  if (!range && msgSelRange && msgInput.contains(msgSelRange.startContainer) && msgInput.contains(msgSelRange.endContainer)) {
+    range = msgSelRange.cloneRange();
+  }
+  const full = msgInput.textContent;
+  if (!range) return { start: full.length, end: full.length, focused };
+  const pre = document.createRange();
+  pre.selectNodeContents(msgInput);
+  pre.setEnd(range.startContainer, range.startOffset);
+  const start = pre.toString().length;
+  const endRange = document.createRange();
+  endRange.selectNodeContents(msgInput);
+  endRange.setEnd(range.endContainer, range.endOffset);
+  const end = endRange.toString().length;
+  return { start: Math.min(start, full.length), end: Math.min(Math.max(start, end), full.length), focused };
+}
+
+function setMsgCaretOffset(offset, keepFocus) {
+  const full = msgInput.textContent;
+  const clamped = Math.max(0, Math.min(offset, full.length));
+  const range = document.createRange();
+  const node = msgInput.firstChild;
+  if (node && node.nodeType === 3) {
+    range.setStart(node, Math.min(clamped, node.data.length));
+    range.collapse(true);
+  } else {
     range.selectNodeContents(msgInput);
     range.collapse(false);
   }
-  range.deleteContents();
-  const tn = document.createTextNode(text);
-  range.insertNode(tn);
-  range.setStartAfter(tn);
-  range.collapse(true);
   msgSelRange = range.cloneRange();
-  if (focused) {
-    sel.removeAllRanges();
-    sel.addRange(range);
+  if (keepFocus || document.activeElement === msgInput) {
+    const sel = window.getSelection();
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
   }
+}
+
+function insertTextAtCaret(text) {
+  if (!text) return;
+  const { start, end, focused } = currentInputOffsets();
+  const full = msgInput.textContent;
+  const avail = Math.max(0, MAX_TEXT - (full.length - (end - start)));
+  if (avail <= 0) return;
+  const ins = String(text).replace(/\r\n?/g, "\n").slice(0, avail);
+  if (!ins) return;
+  const next = full.slice(0, start) + ins + full.slice(end);
+  msgInput.textContent = next;
+  const newOff = start + ins.length;
+  setMsgCaretOffset(newOff, focused);
+  if (newOff >= next.length - 1) msgInput.scrollTop = msgInput.scrollHeight;
   normalizeMsgInput();
   msgInput.dispatchEvent(new Event("input", { bubbles: true }));
 }
@@ -7006,60 +7102,24 @@ function insertMentionIntoInput(name) {
 }
 
 function backspaceEmoji() {
-  const focused = document.activeElement === msgInput;
-  const sel = window.getSelection();
-  let range = null;
-  if (focused && sel && sel.rangeCount) {
-    const r = sel.getRangeAt(0);
-    if (msgInput.contains(r.startContainer)) range = r;
-  }
-  if (!range && msgSelRange && msgInput.contains(msgSelRange.startContainer)) range = msgSelRange.cloneRange();
-  if (!range) {
-    range = document.createRange();
-    range.selectNodeContents(msgInput);
-    range.collapse(false);
-  }
-  if (!range.collapsed) {
-    range.deleteContents();
+  const full = msgInput.textContent;
+  if (!full) return;
+  const { start, end, focused } = currentInputOffsets();
+  let next, newOff;
+  if (end > start) {
+    next = full.slice(0, start) + full.slice(end);
+    newOff = start;
   } else {
-    const c = range.startContainer;
-    let startNode = c, startOff = range.startOffset;
-    if (c.nodeType === 3) {
-      if (startOff > 0) {
-        const gs = splitEmojis(c.data.slice(0, startOff));
-        const last = gs[gs.length - 1];
-        if (!last) return;
-        startOff -= last.length;
-      } else {
-        let prev = c.previousSibling;
-        while (prev && prev.nodeType !== 3) prev = prev.previousSibling;
-        if (!prev) return;
-        startNode = prev;
-        startOff = prev.data.length;
-      }
-    } else if (c.nodeType === 1) {
-      const pc = c.childNodes[startOff - 1];
-      if (!pc) return;
-      let lastText = pc.nodeType === 3 ? pc : pc.lastChild;
-      while (lastText && lastText.nodeType !== 3) lastText = lastText.lastChild;
-      if (!lastText) return;
-      const gs = splitEmojis(lastText.data);
-      const last = gs[gs.length - 1];
-      if (!last) return;
-      startNode = lastText;
-      startOff = lastText.data.length - last.length;
-    } else return;
-    const r2 = document.createRange();
-    r2.setStart(startNode, startOff);
-    r2.setEnd(c, range.startOffset);
-    r2.deleteContents();
-    range = r2;
+    if (start <= 0) return;
+    const gs = splitEmojis(full.slice(0, start));
+    const last = gs[gs.length - 1];
+    if (!last) return;
+    newOff = start - last.length;
+    next = full.slice(0, newOff) + full.slice(start);
   }
-  msgSelRange = range.cloneRange();
-  if (focused) {
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
+  msgInput.textContent = next;
+  if (next.trim()) setMsgCaretOffset(newOff, focused);
+  else msgSelRange = null;
   normalizeMsgInput();
   msgInput.dispatchEvent(new Event("input", { bubbles: true }));
 }
@@ -7068,25 +7128,55 @@ function insertEmoji(em) {
   insertTextAtCaret(em);
   emojiRecents = [em, ...emojiRecents.filter(e => e !== em)].slice(0, 40);
   saveRecents();
-  if (activeCat === "recents") renderEmojiGrid("recents");
+  // Do not reshuffle the Recents grid mid-tap so repeated taps on the same emoji
+  // stay on the exact same cell; Recents refreshes on next tab switch or reopen.
+}
+
+function isDesktopPointer() {
+  return window.matchMedia && window.matchMedia("(min-width: 820px) and (pointer: fine)").matches;
 }
 
 function syncPanelRaise() {
-  document.getElementById("app").classList.toggle("panel-open",
-    !emojiPanel.classList.contains("hide") || !gifPanel.classList.contains("hide"));
+  const openPanel = !emojiPanel.classList.contains("hide")
+    ? emojiPanel
+    : (!gifPanel.classList.contains("hide") ? gifPanel : null);
+  appHost.classList.toggle("panel-open", !!openPanel);
+  if (openPanel) {
+    const cs = getComputedStyle(openPanel);
+    const total = openPanel.offsetHeight + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+    if (total > 0) appHost.style.setProperty("--panel-h", Math.round(total) + "px");
+  } else {
+    appHost.style.removeProperty("--panel-h");
+  }
+}
+
+if (typeof ResizeObserver !== "undefined") {
+  const panelRO = new ResizeObserver(() => {
+    if (appHost.classList.contains("panel-open")) syncPanelRaise();
+  });
+  panelRO.observe(emojiPanel);
+  panelRO.observe(gifPanel);
+}
+
+function isNearScrollBottom() {
+  if (!scrollCtnEl) return false;
+  return scrollCtnEl.scrollHeight - scrollCtnEl.scrollTop - scrollCtnEl.clientHeight < 64;
 }
 
 function openEmojiPanel() {
   if (!emojiPanel.classList.contains("hide")) return;
+  const keepBottom = isNearScrollBottom();
+  if (!gifPanel.classList.contains("hide")) closeGifPanel();
   emojiPanel.classList.remove("hide");
   emojiBtn.classList.add("active");
-  if (!gifPanel.classList.contains("hide")) closeGifPanel();
   renderEmojiTabs();
   switchEmojiCat(activeCat);
-  if (document.activeElement === msgInput) msgInput.blur();
+  if (!isDesktopPointer() && document.activeElement === msgInput) msgInput.blur();
   syncPanelRaise();
+  if (keepBottom) requestAnimationFrame(() => scrollBottom(false));
 }
 function closeEmojiPanel() {
+  stopEmojiBackRepeat();
   if (emojiPanel.classList.contains("hide")) return;
   emojiPanel.classList.add("hide");
   emojiBtn.classList.remove("active");
@@ -7097,13 +7187,15 @@ function toggleEmojiPanel() {
   else closeEmojiPanel();
 }
 
+emojiPanel.addEventListener("click", (e) => e.stopPropagation());
+emojiBtn.addEventListener("mousedown", (e) => { if (isDesktopPointer()) e.preventDefault(); });
 emojiBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   toggleEmojiPanel();
 });
 
 msgInput.addEventListener("focus", () => {
-  if (!emojiPanel.classList.contains("hide")) closeEmojiPanel();
+  if (!isDesktopPointer() && !emojiPanel.classList.contains("hide")) closeEmojiPanel();
 });
 
 /* ================= GIF search ================= */
@@ -7154,6 +7246,7 @@ async function gifFetchPage(query, offset) {
   return { items, done };
 }
 let gifSearchBusy = false;
+let gifSearchSeq = 0;
 let gifState = { q: "", offset: 0, done: false, waiting: false };
 function gifCellEl(r) {
   const cell = document.createElement("button");
@@ -7182,21 +7275,24 @@ function showGifLoader(show) {
 }
 async function gifLoadMore() {
   if (gifSearchBusy || gifState.waiting || gifState.done) return;
+  const seq = gifSearchSeq;
   gifState.waiting = true;
   showGifLoader(true);
   try {
     const { items, done } = await gifFetchPage(gifState.q, gifState.offset);
+    if (seq !== gifSearchSeq) return;
     gifState.offset += GIF_PER_PAGE;
     gifState.done = done;
     showGifLoader(false);
     appendGifItems(items);
     if (!gifState.done) checkGifScroll();
   } catch (e) {
+    if (seq !== gifSearchSeq) return;
     showGifLoader(false);
     gifState.done = true;
     gifGridEl.appendChild(el("div", "gifErr", "Couldn't load more GIFs."));
   } finally {
-    gifState.waiting = false;
+    if (seq === gifSearchSeq) gifState.waiting = false;
   }
 }
 function checkGifScroll() {
@@ -7205,40 +7301,46 @@ function checkGifScroll() {
 }
 async function runGifSearch(query) {
   const q = (query || gifSearchInput.value || "").trim();
-  if (!q || gifSearchBusy) return;
+  if (!q) return;
+  const seq = ++gifSearchSeq;
   gifSearchBusy = true;
   gifState = { q, offset: 0, done: false, waiting: false };
   gifGridEl.innerHTML = "<div class='gifLoad'><span class='miniSpinner'></span> Loading…</div>";
   try {
     const { items, done } = await gifFetchPage(q, 0);
+    if (seq !== gifSearchSeq) return;
     gifState.offset = GIF_PER_PAGE;
     gifState.done = done;
     gifGridEl.innerHTML = "";
     if (!items.length) {
       if (done) gifGridEl.appendChild(el("div", "gifLoad", "No GIFs found — try another search."));
-      else gifLoadMore();
+      else { gifSearchBusy = false; gifLoadMore(); }
       return;
     }
     appendGifItems(items);
+    gifSearchBusy = false;
     checkGifScroll();
   } catch (e) {
+    if (seq !== gifSearchSeq) return;
     gifGridEl.innerHTML = "<div class='gifErr'>Couldn't load GIFs. Check your connection and try again.</div>";
   } finally {
-    gifSearchBusy = false;
+    if (seq === gifSearchSeq) gifSearchBusy = false;
   }
 }
 gifScroll.addEventListener("scroll", checkGifScroll);
 
 function openGifPanel() {
   if (!gifPanel.classList.contains("hide")) return;
+  const keepBottom = isNearScrollBottom();
+  if (!emojiPanel.classList.contains("hide")) closeEmojiPanel();
   gifPanel.classList.remove("hide");
   gifBtn.classList.add("active");
-  if (!emojiPanel.classList.contains("hide")) closeEmojiPanel();
   renderGifChips();
   if (!gifGridEl.children.length) runGifSearch("funny");
   if (document.activeElement === msgInput) msgInput.blur();
   setTimeout(() => gifSearchInput.focus(), 60);
   syncPanelRaise();
+  if (keepBottom) requestAnimationFrame(() => scrollBottom(false));
 }
 function closeGifPanel() {
   if (gifPanel.classList.contains("hide")) return;
@@ -7251,6 +7353,7 @@ function toggleGifPanel() {
   else closeGifPanel();
 }
 
+gifPanel.addEventListener("click", (e) => e.stopPropagation());
 gifBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   toggleGifPanel();
@@ -7814,6 +7917,8 @@ function beginSelection(wrap, m) {
   selectionMode = true;
   closeReactionBar();
   closeEmojiPicker();
+  closeEmojiPanel();
+  closeGifPanel();
   withScrollPinned(() => {
     appEl.classList.add("selMode");
     selItems.set(wrap, m);
@@ -8591,6 +8696,8 @@ document.addEventListener("keydown", (e) => {
   if (rxBarOpen()) closeReactionBar();
   if (rxWhoOpen()) closeReactionWho();
   if (rxPickOpen()) closeEmojiPicker();
+  if (!emojiPanel.classList.contains("hide")) closeEmojiPanel();
+  if (!gifPanel.classList.contains("hide")) closeGifPanel();
 });
 
 function wireSelection(wrap, bubble, m) {
@@ -8744,7 +8851,7 @@ function interactionReady() { return ageApproved && tacAgreed && savedNickApplie
 function updateGate() {
   const ready = interactionReady();
   gateOverlay.classList.toggle("hide", ready);
-  msgInput.disabled = !ready;
+  msgInput.setAttribute("contenteditable", ready ? "true" : "false");
   if (ready) maybeFirstMsgGuide();
 }
 
