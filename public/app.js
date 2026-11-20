@@ -162,6 +162,7 @@ function persistNick(name, pass) {
   lsSet("tgNick_" + (window.generatorName || "chat"), name);
   if (root.kv && root.kv.identity) root.kv.identity.set(nickKvKey, name).catch(() => {});
   if (pass) {
+    savedAdminPass = pass;
     lsSet("tgAdminPass_" + (window.generatorName || "chat"), pass);
     if (root.kv && root.kv.identity) root.kv.identity.set(adminKvKey, pass).catch(() => {});
   }
@@ -7545,6 +7546,7 @@ nickItem.addEventListener("click", () => {
   nickPassInput.classList.add("hide");
   nickPassInput.value = needsPass(nickInput.value.trim()) ? savedAdminPass : "";
   if (needsPass(nickInput.value.trim())) nickPassInput.classList.remove("hide");
+  if (changePassBtn) changePassBtn.classList.toggle("hide", !myName);
   pfpDraft = null;
   renderPfpPreview();
   nickModal.classList.remove("hide");
@@ -7769,6 +7771,105 @@ nickOkBtn.addEventListener("click", async () => {
   } catch (e) {}
 });
 nickInput.addEventListener("keydown", (e) => { if (e.key === "Enter") nickOkBtn.click(); });
+const changePassBtn = document.getElementById("changePassBtn");
+const changePassModal = document.getElementById("changePassModal");
+const cpCurrentInput = document.getElementById("cpCurrentInput");
+const cpNewInput = document.getElementById("cpNewInput");
+const cpConfirmInput = document.getElementById("cpConfirmInput");
+const cpCancelBtn = document.getElementById("cpCancelBtn");
+const cpOkBtn = document.getElementById("cpOkBtn");
+if (changePassBtn && changePassModal) {
+  let cpBusy = false;
+  function closeChangePassModal() {
+    if (cpBusy) return;
+    cpCurrentInput.value = "";
+    cpNewInput.value = "";
+    cpConfirmInput.value = "";
+    changePassModal.classList.add("hide");
+  }
+  changePassBtn.addEventListener("click", () => {
+    if (!myName) { toast("Join first to change your password"); return; }
+    cpCurrentInput.value = "";
+    cpNewInput.value = "";
+    cpConfirmInput.value = "";
+    changePassModal.classList.remove("hide");
+    cpCurrentInput.focus();
+  });
+  cpCancelBtn.addEventListener("click", closeChangePassModal);
+  changePassModal.addEventListener("click", (e) => { if (e.target === changePassModal) closeChangePassModal(); });
+  cpCurrentInput.addEventListener("keydown", (e) => { if (e.key === "Enter") cpNewInput.focus(); });
+  cpNewInput.addEventListener("keydown", (e) => { if (e.key === "Enter") cpConfirmInput.focus(); });
+  cpConfirmInput.addEventListener("keydown", (e) => { if (e.key === "Enter") cpOkBtn.click(); });
+  cpOkBtn.addEventListener("click", async () => {
+    if (cpBusy || !myName) return;
+    const curPass = cpCurrentInput.value;
+    const newPass = cpNewInput.value;
+    const confirmPass = cpConfirmInput.value;
+    if (!curPass) {
+      toast("Enter your current password");
+      cpCurrentInput.focus();
+      return;
+    }
+    if (newPass.length < 4) {
+      toast("New password must be at least 4 characters");
+      cpNewInput.focus();
+      return;
+    }
+    if (newPass !== confirmPass) {
+      toast("New passwords don't match");
+      cpConfirmInput.value = "";
+      cpConfirmInput.focus();
+      return;
+    }
+    if (newPass === curPass) {
+      toast("New password must be different from current password");
+      cpNewInput.focus();
+      return;
+    }
+    for (let i = 0; i < 25 && !(socket && socket.readyState === 1); i++) await new Promise((r) => setTimeout(r, 200));
+    if (!socket || socket.readyState !== 1) { toast("Not connected — try again"); return; }
+    cpBusy = true;
+    cpOkBtn.disabled = true;
+    cpOkBtn.textContent = "Updating\u2026";
+    try {
+      const r = await socket.rpc.changePassword(JSON.stringify({ currentPassword: curPass, newPassword: newPass }));
+      if (r === "ok") {
+        persistNick(myName, newPass);
+        if (nickInput.value.trim().toLowerCase() === myName.toLowerCase()) {
+          nickPassInput.value = newPass;
+        }
+        cpBusy = false;
+        cpOkBtn.disabled = false;
+        cpOkBtn.textContent = "Update";
+        closeChangePassModal();
+        toast("Password updated");
+        return;
+      }
+      if (r === "wrong_password" || r === "password_required") {
+        toast("Current password is incorrect");
+        cpCurrentInput.value = "";
+        cpCurrentInput.focus();
+      } else if (r === "weak_password") {
+        toast("New password must be at least 4 characters");
+        cpNewInput.focus();
+      } else if (r === "same_password") {
+        toast("New password must be different from current password");
+        cpNewInput.focus();
+      } else if (r === "too_many_attempts") {
+        toast("Too many attempts. Try again later.");
+      } else if (r === "admin_unsupported") {
+        toast("Admin password cannot be changed here");
+      } else {
+        toast("Couldn't update password");
+      }
+    } catch (e) {
+      toast("Couldn't update password");
+    }
+    cpBusy = false;
+    cpOkBtn.disabled = false;
+    cpOkBtn.textContent = "Update";
+  });
+}
 const delAccountBtn = document.getElementById("delAccountBtn");
 const delAccModal = document.getElementById("delAccModal");
 const delAccPassInput = document.getElementById("delAccPassInput");
@@ -8885,6 +8986,12 @@ document.addEventListener("keydown", (e) => {
   if (rxPickOpen()) closeEmojiPicker();
   if (!emojiPanel.classList.contains("hide")) closeEmojiPanel();
   if (!gifPanel.classList.contains("hide")) closeGifPanel();
+  if (changePassModal && !changePassModal.classList.contains("hide") && !cpOkBtn.disabled) {
+    cpCurrentInput.value = "";
+    cpNewInput.value = "";
+    cpConfirmInput.value = "";
+    changePassModal.classList.add("hide");
+  }
 });
 
 function wireSelection(wrap, bubble, m) {
