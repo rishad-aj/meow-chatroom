@@ -2187,12 +2187,22 @@
   #emojiTabs {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 4px;
     padding: 4px 6px;
     border-bottom: 1px solid #eef1f5;
     flex-shrink: 0;
     background: #fafbfc;
   }
+  #emojiTabList {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  #emojiTabList::-webkit-scrollbar { display: none; }
   .emojiTab {
     background: none;
     border: none;
@@ -2202,17 +2212,31 @@
     height: 38px;
     border-radius: 9px;
     cursor: pointer;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     filter: grayscale(1) opacity(0.55);
     padding: 0;
     font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+    transition: background 0.14s ease, filter 0.14s ease;
   }
   .emojiTab:hover { background: #eef2f7; filter: none; }
   .emojiTab.active { background: #e3ecf5; filter: none; }
   .emojiTab.recentsTab { font-size: 15px; }
-  #emojiScroll { flex: 1; overflow-y: auto; overflow-x: hidden; }
+  #emojiScroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(142, 142, 147, 0.35) transparent;
+  }
+  #emojiScroll::-webkit-scrollbar,
+  #gifScroll::-webkit-scrollbar { width: 5px; }
+  #emojiScroll::-webkit-scrollbar-track,
+  #gifScroll::-webkit-scrollbar-track { background: transparent; }
+  #emojiScroll::-webkit-scrollbar-thumb,
+  #gifScroll::-webkit-scrollbar-thumb { background: rgba(142, 142, 147, 0.32); border-radius: 999px; }
   #emojiGrid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
@@ -2234,9 +2258,10 @@
     align-items: center;
     justify-content: center;
     font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+    transition: background 0.12s ease, transform 0.08s ease;
   }
   .emojiCell:hover { background: #eef2f7; }
-  .emojiCell:active { background: #dce6f0; }
+  .emojiCell:active { background: #dce6f0; transform: scale(0.92); }
   .cIcon.active { color: #2678b6 !important; background: #e3ecf5; }
   .emojiCatHead {
     grid-column: 1 / -1;
@@ -2257,20 +2282,33 @@
   .emojiBack {
     background: none;
     border: none;
-    width: 26px;
-    height: 26px;
-    border-radius: 7px;
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
     cursor: pointer;
-    color: #90a4ae;
+    color: #707579;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
     flex-shrink: 0;
+    position: relative;
+    transition: background 0.14s ease, color 0.14s ease;
   }
-  .emojiBack:hover { background: #eef2f7; color: #4a5a66; }
+  .emojiBack::before {
+    content: "";
+    position: absolute;
+    left: -3px;
+    top: 8px;
+    bottom: 8px;
+    width: 1px;
+    background: rgba(0, 0, 0, 0.08);
+    pointer-events: none;
+  }
+  .emojiBack:hover { background: #eef2f7; color: #374151; }
   .emojiBack:active { background: #dce6f0; }
   .emojiEmpty {
+    grid-column: 1 / -1;
     padding: 26px 10px;
     text-align: center;
     color: #a2acb4;
@@ -2426,8 +2464,9 @@
   #unreadChipBtn:active { transform: translateX(-50%) scale(0.96); }
   #unreadChipBtn.hide { display: none; }
 
-  #app.panel-open #scrollDownBtn { bottom: calc(clamp(170px, 40vh, 330px) + 86px); }
-  #app.panel-open #unreadChipBtn { bottom: calc(clamp(170px, 40vh, 330px) + 82px); }
+  #app.panel-open #scrollDownBtn { bottom: calc(var(--panel-h, clamp(170px, 40vh, 330px)) + var(--compose-h, 68px) + 18px); }
+  #app.panel-open #unreadChipBtn { bottom: calc(var(--panel-h, clamp(170px, 40vh, 330px)) + var(--compose-h, 68px) + 14px); }
+  #app.panel-open #toast { bottom: calc(var(--panel-h, clamp(170px, 40vh, 330px)) + var(--compose-h, 68px) + 10px); }
 
   /* ---------- toast ---------- */
   #toast {
@@ -3033,6 +3072,7 @@
   body.dark .emojiTab.active, body.dark .emojiCell:active { background: #383844; }
   body.dark .emojiCatHead { color: #9aa0a8; }
   body.dark .emojiBack { color: #9aa0a8; }
+  body.dark .emojiBack::before { background: rgba(255, 255, 255, 0.08); }
   body.dark .emojiBack:hover { background: #2e2e36; color: #d6d6dc; }
   body.dark .emojiBack:active { background: #383844; }
   body.dark .emojiEmpty { color: #828990; }
@@ -3587,7 +3627,180 @@
       right: 62px;
     }
     #composeBar, #selActionBar { grid-area: compose; }
-    #emojiPanel, #gifPanel { grid-area: panels; }
+    #composeBar {
+      padding: 8px 14px 12px 4px;
+      gap: 8px;
+    }
+    /* PC view composer & keyboard palette — matches floating chat list (#peopleScreen) & capsule header (#topbar) */
+    #field {
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(18px) saturate(150%);
+      -webkit-backdrop-filter: blur(18px) saturate(150%);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.05);
+    }
+    #composeBar.bar-open #composeCol {
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(18px) saturate(150%);
+      -webkit-backdrop-filter: blur(18px) saturate(150%);
+      border-radius: 20px;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.05);
+    }
+    #msgInput { color: #111111; }
+    #msgInput:empty::before { color: #8e8e93; }
+    .cIcon { color: #6e7378 !important; }
+    .cIcon:hover { background: rgba(0, 0, 0, 0.06); color: #111111 !important; }
+    .cIcon.active { color: #7762db !important; background: rgba(135, 116, 225, 0.15); }
+    #micBtn, #sendBtn {
+      background: #8774e1;
+      box-shadow: 0 4px 14px rgba(135, 116, 225, 0.34);
+    }
+    #micBtn:hover, #sendBtn:hover { background: #7561d4; }
+    #replyQuote, #editQuote { border-left-color: #8774e1; }
+    #replyName, #editLabel { color: #7762db; }
+    #recBar {
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(18px) saturate(150%);
+      -webkit-backdrop-filter: blur(18px) saturate(150%);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    }
+    #recCancelBtn { color: #7762db; }
+    #recCancelBtn:hover { color: #5f4bc2; }
+    #fmtBar {
+      background: rgba(255, 255, 255, 0.96);
+      border-color: rgba(0, 0, 0, 0.08);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+    }
+    #fmtBar::after { border-top-color: rgba(255, 255, 255, 0.96); }
+    #fmtBar .fmtBtn:hover { background: rgba(135, 116, 225, 0.12); color: #7762db; }
+    #mentionPop {
+      background: rgba(255, 255, 255, 0.94);
+      border-color: rgba(0, 0, 0, 0.08);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+    }
+    #mentionPop .mRow.sel { background: rgba(135, 116, 225, 0.14); }
+    #emojiPanel, #gifPanel {
+      grid-area: panels;
+      margin: 0 14px 12px 4px;
+      border-radius: 20px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(18px) saturate(150%);
+      -webkit-backdrop-filter: blur(18px) saturate(150%);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+    #emojiTabs, #gifTop {
+      background: rgba(246, 246, 250, 0.9);
+      border-bottom-color: rgba(0, 0, 0, 0.06);
+    }
+    .emojiTab:hover, .emojiCell:hover, .emojiBack:hover { background: rgba(0, 0, 0, 0.055); }
+    .emojiTab.active, .emojiCell:active, .emojiBack:active { background: rgba(135, 116, 225, 0.16); }
+    .emojiCatHead { color: #6e7378; }
+    .emojiBack { color: #6e7378; }
+    .emojiBack:hover { color: #111111; }
+    #gifTop input {
+      background: #ffffff;
+      border-color: rgba(0, 0, 0, 0.1);
+      color: #111111;
+    }
+    #gifTop input:focus { border-color: #8774e1; }
+    #gifTop button { background: #8774e1; }
+    #gifTop button:hover { background: #7561d4; }
+    #gifChips { border-bottom-color: rgba(0, 0, 0, 0.06); }
+    #gifChips button {
+      background: #f0f1f6;
+      border-color: rgba(0, 0, 0, 0.06);
+      color: #4b5563;
+      transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+    }
+    #gifChips button:hover {
+      background: rgba(135, 116, 225, 0.14);
+      border-color: rgba(135, 116, 225, 0.3);
+      color: #7762db;
+    }
+    body.dark #field {
+      background: rgba(31, 31, 33, 0.92);
+      border-color: rgba(255, 255, 255, 0.08);
+      box-shadow: 0 8px 26px rgba(0, 0, 0, 0.52), 0 2px 8px rgba(0, 0, 0, 0.32);
+    }
+    body.dark #composeBar.bar-open #composeCol {
+      background: rgba(31, 31, 33, 0.94);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 26px rgba(0, 0, 0, 0.52), 0 2px 8px rgba(0, 0, 0, 0.32);
+    }
+    body.dark #msgInput { color: #f5f5f7; }
+    body.dark #msgInput:empty::before { color: #8e8e93; }
+    body.dark .cIcon { color: #98989f !important; }
+    body.dark .cIcon:hover { background: rgba(255, 255, 255, 0.09); color: #f5f5f7 !important; }
+    body.dark .cIcon.active { color: #a08ef9 !important; background: #2c273c; }
+    body.dark #micBtn, body.dark #sendBtn {
+      background: #8774e1;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+    }
+    body.dark #micBtn:hover, body.dark #sendBtn:hover { background: #7561d4; }
+    body.dark #replyName, body.dark #editLabel { color: #a08ef9; }
+    body.dark #recBar {
+      background: rgba(31, 31, 33, 0.94);
+      border-color: rgba(255, 255, 255, 0.08);
+      box-shadow: 0 8px 26px rgba(0, 0, 0, 0.52);
+    }
+    body.dark #recCancelBtn { color: #a08ef9; }
+    body.dark #recCancelBtn:hover { color: #c4b7ff; }
+    body.dark #fmtBar {
+      background: #232327;
+      border-color: rgba(255, 255, 255, 0.1);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.56);
+    }
+    body.dark #fmtBar::after { border-top-color: #232327; }
+    body.dark #fmtBar .fmtBtn:hover { background: #2c273c; color: #a08ef9; }
+    body.dark #mentionPop {
+      background: rgba(31, 31, 33, 0.95);
+      border-color: rgba(255, 255, 255, 0.08);
+      box-shadow: 0 12px 34px rgba(0, 0, 0, 0.62);
+    }
+    body.dark #mentionPop .mRow.sel { background: #2c273c; }
+    body.dark #emojiPanel, body.dark #gifPanel {
+      background: rgba(31, 31, 33, 0.95);
+      border-color: rgba(255, 255, 255, 0.08);
+      box-shadow: 0 12px 34px rgba(0, 0, 0, 0.62), 0 2px 10px rgba(0, 0, 0, 0.36);
+    }
+    body.dark #emojiTabs, body.dark #gifTop {
+      background: #1a1a1d;
+      border-bottom-color: rgba(255, 255, 255, 0.07);
+    }
+    body.dark .emojiTab:hover, body.dark .emojiCell:hover, body.dark .emojiBack:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+    body.dark .emojiTab.active { background: #2c273c; }
+    body.dark .emojiCell:active, body.dark .emojiBack:active { background: rgba(135, 116, 225, 0.24); }
+    body.dark .emojiCatHead { color: #8e8e93; }
+    body.dark .emojiBack { color: #98989f; }
+    body.dark .emojiBack:hover { color: #f5f5f7; }
+    body.dark .emojiEmpty { color: #8e8e93; }
+    body.dark #gifTop input {
+      background: #2b2b2e;
+      border-color: rgba(255, 255, 255, 0.08);
+      color: #f5f5f7;
+    }
+    body.dark #gifTop input:focus { border-color: rgba(135, 116, 225, 0.75); }
+    body.dark #gifTop button { background: #8774e1; }
+    body.dark #gifTop button:hover { background: #7561d4; }
+    body.dark #gifChips {
+      background: rgba(26, 26, 29, 0.6);
+      border-bottom-color: rgba(255, 255, 255, 0.07);
+    }
+    body.dark #gifChips button {
+      background: #2b2b2e;
+      border-color: rgba(255, 255, 255, 0.07);
+      color: #d1d1d6;
+    }
+    body.dark #gifChips button:hover {
+      background: #2c273c;
+      border-color: rgba(135, 116, 225, 0.35);
+      color: #a08ef9;
+    }
+    body.dark #gifGrid .gifCell { background: #2a2a2e; }
     #peopleScreen {
       grid-area: side; flex: none;
       height: calc(100% - 24px);
