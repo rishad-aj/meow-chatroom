@@ -417,7 +417,7 @@ SupaSocket.prototype._presence = function () {
     for (nm in self._stable) {
       if (!cur[nm]) {
         if (nm === self._myName || (self._expectName && nm === self._expectName)) continue;
-        if (self._stable[nm] >= 1 &&
+        if (!/^Guest\d{4}$/i.test(nm) && self._stable[nm] >= 1 &&
             (!self._renameCool[nm] || now - self._renameCool[nm] > 8000) &&
             (!self._leftCool[nm] || now - self._leftCool[nm] > 25000)) {
           self._leftCool[nm] = now;
@@ -740,8 +740,11 @@ SupaSocket.prototype.rpc.setName = function (data) {
     } catch (e) {}
     self._ensureInbox(finalName).then(function () {
       try { self._room.track({ name: finalName, uid: self._myUid || "", named: true }); } catch (e) {}
-      if (first && !self._quietJoin) self._broad({ t: "system", text: finalName + " joined", ts: Date.now() });
-      else if (old && old !== finalName) {
+      if (first) {
+        if (!self._quietJoin && !/^Guest\d{4}$/i.test(finalName)) {
+          self._broad({ t: "system", text: finalName + " joined", ts: Date.now() });
+        }
+      } else if (old && old !== finalName && !/^Guest\d{4}$/i.test(old) && !/^Guest\d{4}$/i.test(finalName)) {
         self._broad({ t: "rename", from: old, to: finalName, uid: self._myUid || "", ts: Date.now() });
         self._broad({ t: "system", text: old + " is now " + finalName, ts: Date.now() });
       }
