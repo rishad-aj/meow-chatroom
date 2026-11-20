@@ -5121,6 +5121,7 @@ function handleMessage(m) {
   } else if (m.t === "me") {
     if (!savedNickApplied) myName = m.name;
   } else if (m.t === "chat" || m.t === "system" || m.t === "img" || m.t === "voice") {
+    if (m.t === "system" && /^Guest\d{4}\s+(is now|joined|left)\b/i.test(String(m.text || "").trim())) return;
     if (historyLoading && (m.t === "chat" || m.t === "img" || m.t === "voice")) { historyBuffer.push(m); return; }
     if (alreadyRendered(roomMessagesEl, m)) return;
     // Room traffic keeps rendering into the room, even when a private chat is
@@ -5165,6 +5166,7 @@ function handleMessage(m) {
     // Keeps the room's row in a wide layout (preview + unread count) current.
     refreshListView();
   } else if (m.t === "rename") {
+    if (/^Guest\d{4}$/i.test(String(m.from || ""))) return;
     applyRename(String(m.from || ""), String(m.to || ""), m.uid || "");
   } else if (m.t === "presence") {
     onlineCount = m.count;
