@@ -979,8 +979,10 @@ function noteViewPos(e) {
 }
 roomScrollCtn.addEventListener("scroll", noteViewPos, { passive: true });
 dmScrollEl.addEventListener("scroll", noteViewPos, { passive: true });
+let selSuppressResyncUntil = 0;
 function resyncBottom() {
   if (!stickToBottom) return;
+  if (Date.now() < selSuppressResyncUntil) return;
   if (document.getElementById("app").classList.contains("selMode")) return;
   const sc = scrollCtnEl;
   if (sc.scrollHeight - sc.scrollTop - sc.clientHeight < 1) return;
@@ -7150,14 +7152,6 @@ function syncPanelRaise() {
   }
 }
 
-if (typeof ResizeObserver !== "undefined") {
-  const panelRO = new ResizeObserver(() => {
-    if (appHost.classList.contains("panel-open")) syncPanelRaise();
-  });
-  panelRO.observe(emojiPanel);
-  panelRO.observe(gifPanel);
-}
-
 function isNearScrollBottom() {
   if (!scrollCtnEl) return false;
   return scrollCtnEl.scrollHeight - scrollCtnEl.scrollTop - scrollCtnEl.clientHeight < 64;
@@ -7200,6 +7194,13 @@ msgInput.addEventListener("focus", () => {
 
 /* ================= GIF search ================= */
 const gifPanel = document.getElementById("gifPanel");
+if (typeof ResizeObserver !== "undefined") {
+  const panelRO = new ResizeObserver(() => {
+    if (appHost.classList.contains("panel-open")) syncPanelRaise();
+  });
+  panelRO.observe(emojiPanel);
+  panelRO.observe(gifPanel);
+}
 const gifSearchInput = document.getElementById("gifSearchInput");
 const gifSearchBtn = document.getElementById("gifSearchBtn");
 const gifChipsEl = document.getElementById("gifChips");
@@ -7896,21 +7897,35 @@ function updateSelBar() {
 
 function withScrollPinned(fn, anchorEl) {
   const sc = scrollCtnEl;
+  const prevTop = sc.scrollTop;
+  const prevStick = stickToBottom;
   const sct = sc.getBoundingClientRect();
   let anchor = null;
-  if (anchorEl) {
+  if (anchorEl && anchorEl.isConnected) {
     anchor = { el: anchorEl, off: anchorEl.getBoundingClientRect().top - sct.top };
   } else {
+    const minTop = sct.top + (isDesk() ? 76 : 1);
     for (const child of messagesEl.children) {
       const r = child.getBoundingClientRect();
-      if (r.bottom > sct.top + 1) { anchor = { el: child, off: r.top - sct.top }; break; }
+      if (r.bottom > minTop) { anchor = { el: child, off: r.top - sct.top }; break; }
     }
   }
+  selSuppressResyncUntil = Date.now() + 220;
   fn();
-  if (!anchor) return;
+  if (!anchor || !anchor.el.isConnected) {
+    if (Math.abs(sc.scrollTop - prevTop) >= 1) sc.scrollTop = prevTop;
+    stickToBottom = prevStick;
+    return;
+  }
   const cr = sc.getBoundingClientRect();
   const ar = anchor.el.getBoundingClientRect();
-  sc.scrollTop += (ar.top - cr.top) - anchor.off;
+  const delta = (ar.top - cr.top) - anchor.off;
+  if (Math.abs(delta) >= 1) {
+    sc.scrollTop += delta;
+  } else if (Math.abs(sc.scrollTop - prevTop) >= 1) {
+    sc.scrollTop = prevTop;
+  }
+  stickToBottom = prevStick;
 }
 
 function beginSelection(wrap, m) {
@@ -7931,12 +7946,13 @@ function toggleSelect(wrap, m) {
   if (selItems.has(wrap)) {
     selItems.delete(wrap);
     wrap.classList.remove("selected");
-    if (selItems.size === 0) { endSelection(); return; }
+    if (selItems.size === 0) { endSelection(wrap); return; }
   }
   else { selItems.set(wrap, m); wrap.classList.add("selected"); }
   updateSelBar();
 }
-function endSelection() {
+function endSelection(anchorEl) {
+  const anchor = (anchorEl && anchorEl.nodeType === 1) ? anchorEl : (selItems.size ? selItems.keys().next().value : null);
   selectionMode = false;
   withScrollPinned(() => {
     appEl.classList.remove("selMode");
@@ -7944,7 +7960,7 @@ function endSelection() {
     for (const w of selItems.keys()) w.classList.remove("selected");
     selItems.clear();
     updateSelBar();
-  });
+  }, anchor);
 }
 
 /* ================= message reactions =================
