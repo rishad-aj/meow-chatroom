@@ -1726,6 +1726,7 @@ function applyLayoutMode() {
     if (peopleOpen) startPeopleTimer();
   }
   refreshListView();
+  if (typeof syncVisualViewport === "function") syncVisualViewport();
   requestAnimationFrame(() => syncFolderIndicator(false));
 }
 deskMQ.addEventListener("change", applyLayoutMode);
@@ -2460,7 +2461,7 @@ function applyTheme() {
   const thl = themeItem.querySelector(".popLabel");
   if (thl) thl.textContent = "Theme: " + (dark ? "Dark" : "Light");
   const tc = document.querySelector('meta[name="theme-color"]');
-  if (tc) tc.content = dark ? "#212121" : "#2563eb";
+  if (tc) tc.content = dark ? "#1f1f21" : "#ffffff";
 }
 themeItem.addEventListener("click", () => {
   menuPop.classList.add("hide");
@@ -3264,6 +3265,7 @@ function startEdit(m) {
   sendBtn.innerHTML = SAVE_SVG;
   updateSendBtn();
   msgInput.focus();
+  setCaretInInput(msgInput.textContent.length);
 }
 
 function cancelEdit() {
@@ -3311,6 +3313,7 @@ function wireReply(wrap, bubble, m) {
   if (convo.mode === "monitor") return;   // no swipe-to-reply in the admin's monitor
   let startX = 0, startY = 0, swiping = false, claimed = false, dx = 0;
   wrap.addEventListener("touchstart", (e) => {
+    if (selectionMode) return;
     startX = e.touches[0].clientX;
     startY = e.touches[0].clientY;
     swiping = true;
@@ -3322,6 +3325,7 @@ function wireReply(wrap, bubble, m) {
     dx = e.touches[0].clientX - startX;
     const dy = e.touches[0].clientY - startY;
     if (!claimed) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) { swiping = false; return; }
       if (dx > 12 && Math.abs(dx) > Math.abs(dy) * 1.2) claimed = true;
       else return;
     }
@@ -5971,8 +5975,11 @@ function dmSend(payload) {
   if (payload && payload.sub) sbDmMirrorSend(peer, payload);
 }
 
+let sendBtnHadFocus = false;
 function sendChat() {
   if (!interactionReady()) { tacModal.classList.remove("hide"); return; }
+  const keepFocus = isDesktopPointer() || document.activeElement === msgInput || sendBtnHadFocus;
+  sendBtnHadFocus = false;
   const text = msgInput.textContent.trim().slice(0, MAX_TEXT);
   if (!socket || socket.readyState !== 1) return;
   const dm = convo.mode === "dm";
@@ -5985,7 +5992,7 @@ function sendChat() {
     }
     else socket.send(JSON.stringify({ t: "edit", id: editingMsg.id, text, ts: editingMsg.ts || null, from: editingMsg.from || null }));
     cancelEdit();
-    msgInput.focus();
+    if (keepFocus) msgInput.focus();
     return;
   }
   if (!text) return;
@@ -6009,7 +6016,7 @@ function sendChat() {
   updateSendBtn();
   closeEmojiPanel();
   closeGifPanel();
-  msgInput.focus();
+  if (keepFocus) msgInput.focus();
 }
 
 function sendTyping() {
@@ -6447,7 +6454,7 @@ function connect() {  // Exactly one live socket at a time. A reconnect replaces
     }
     refreshListView();
     historySoftRejoin = false;
-    if (interactionReady()) msgInput.focus();
+    if (interactionReady() && isDesktopPointer()) msgInput.focus();
   });
 
   s.addEventListener("message", (e) => {
@@ -6466,6 +6473,12 @@ function connect() {  // Exactly one live socket at a time. A reconnect replaces
   });
 }
 
+sendBtn.addEventListener("pointerdown", () => {
+  sendBtnHadFocus = document.activeElement === msgInput;
+});
+sendBtn.addEventListener("mousedown", (e) => {
+  if (document.activeElement === msgInput) e.preventDefault();
+});
 sendBtn.addEventListener("click", () => { if (recording) sendVoice(); else sendChat(); });
 msgInput.addEventListener("keydown", (e) => {
   if (!mentionPop.classList.contains("hide")) {
@@ -6478,7 +6491,15 @@ msgInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
   else if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); insertTextAtCaret("\n"); }
 });
-msgInput.addEventListener("input", () => { normalizeMsgInput(); updateSendBtn(); sendTyping(); updateMentionPopup(); });
+let isMsgComposing = false;
+msgInput.addEventListener("compositionstart", () => { isMsgComposing = true; });
+msgInput.addEventListener("compositionend", () => {
+  isMsgComposing = false;
+  normalizeMsgInput();
+  updateSendBtn();
+  updateMentionPopup();
+});
+msgInput.addEventListener("input", () => { if (!isMsgComposing) normalizeMsgInput(); updateSendBtn(); sendTyping(); updateMentionPopup(); });
 msgInput.addEventListener("keyup", saveMsgSelection);
 msgInput.addEventListener("click", saveMsgSelection);
 document.addEventListener("selectionchange", saveMsgSelection);
@@ -6523,7 +6544,7 @@ async function openImageForSend(file) {
   capImg.src = URL.createObjectURL(blob);
   capInput.value = "";
   captionModal.classList.remove("hide");
-  capInput.focus();
+  if (isDesktopPointer()) capInput.focus();
 }
 
 function openGifUrlForSend(url) {
@@ -6533,7 +6554,7 @@ function openGifUrlForSend(url) {
   capImg.src = pendingGifUrl;
   capInput.value = "";
   captionModal.classList.remove("hide");
-  capInput.focus();
+  if (isDesktopPointer()) capInput.focus();
 }
 
 attachBtn.addEventListener("click", () => imgInput.click());
@@ -6706,6 +6727,7 @@ function renderEmojiTabs() {
   bb.addEventListener("pointerup", stopEmojiBackRepeat);
   bb.addEventListener("pointerleave", stopEmojiBackRepeat);
   bb.addEventListener("pointercancel", stopEmojiBackRepeat);
+  bb.addEventListener("contextmenu", (e) => e.preventDefault());
   bb.addEventListener("click", (e) => e.stopPropagation());
   emojiTabsEl.appendChild(bb);
 }
@@ -6766,7 +6788,15 @@ function renderEmojiGrid(catId) {
 function switchEmojiCat(catId) {
   activeCat = catId;
   const list = emojiTabListEl ? emojiTabListEl.children : emojiTabsEl.children;
-  for (const t of list) t.classList.toggle("active", t.dataset.cat === catId);
+  let activeBtn = null;
+  for (const t of list) {
+    const on = t.dataset.cat === catId;
+    t.classList.toggle("active", on);
+    if (on) activeBtn = t;
+  }
+  if (activeBtn && activeBtn.scrollIntoView) {
+    activeBtn.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }
   renderEmojiGrid(catId);
   emojiScroll.scrollTop = 0;
 }
@@ -6784,6 +6814,7 @@ function saveMsgSelection() {
 }
 
 function normalizeMsgInput() {
+  if (isMsgComposing) return;
   // Collapse any browser-injected <br>/<div> blocks into plain text newlines so
   // caret offset math, formatting, and sendChat() never drop line breaks.
   if (msgInput.querySelector("br, div, p")) {
@@ -6957,13 +6988,21 @@ function applyFormat(fmt) {
 }
 document.querySelectorAll("#fmtBar .fmtBtn").forEach((btn) => {
   const fmt = btn.dataset.fmt;
+  let lastTouchApply = 0;
   btn.addEventListener("pointerdown", (e) => {
     const r = fmtRangeInInput();
     if (r) fmtSavedRange = r;
+    if (e.pointerType !== "touch") e.preventDefault();
   });
-  btn.addEventListener("mousedown", (e) => e.preventDefault());
-  btn.addEventListener("touchstart", (e) => e.preventDefault());
-  btn.addEventListener("click", () => applyFormat(fmt));
+  btn.addEventListener("touchend", (e) => {
+    e.preventDefault();
+    lastTouchApply = Date.now();
+    applyFormat(fmt);
+  }, { passive: false });
+  btn.addEventListener("click", () => {
+    if (Date.now() - lastTouchApply < 450) return;
+    applyFormat(fmt);
+  });
 });
 document.addEventListener("pointerdown", (e) => {
   if (e.target.closest("#fmtBar") || e.target.closest("#msgInput")) return;
@@ -7167,7 +7206,7 @@ function openEmojiPanel() {
   switchEmojiCat(activeCat);
   if (!isDesktopPointer() && document.activeElement === msgInput) msgInput.blur();
   syncPanelRaise();
-  if (keepBottom) requestAnimationFrame(() => scrollBottom(false));
+  if (keepBottom) requestAnimationFrame(() => scrollBottom(true));
 }
 function closeEmojiPanel() {
   stopEmojiBackRepeat();
@@ -7190,6 +7229,7 @@ emojiBtn.addEventListener("click", (e) => {
 
 msgInput.addEventListener("focus", () => {
   if (!isDesktopPointer() && !emojiPanel.classList.contains("hide")) closeEmojiPanel();
+  if (!isDesktopPointer() && !gifPanel.classList.contains("hide")) closeGifPanel();
 });
 
 /* ================= GIF search ================= */
@@ -7339,9 +7379,9 @@ function openGifPanel() {
   renderGifChips();
   if (!gifGridEl.children.length) runGifSearch("funny");
   if (document.activeElement === msgInput) msgInput.blur();
-  setTimeout(() => gifSearchInput.focus(), 60);
+  if (isDesktopPointer()) setTimeout(() => gifSearchInput.focus(), 60);
   syncPanelRaise();
-  if (keepBottom) requestAnimationFrame(() => scrollBottom(false));
+  if (keepBottom) requestAnimationFrame(() => scrollBottom(true));
 }
 function closeGifPanel() {
   if (gifPanel.classList.contains("hide")) return;
@@ -8350,22 +8390,39 @@ function closeReactionWho() {
   rxWhoEmoji = "";
   if (rxWhoOpen()) rxWhoPop.classList.add("hide");
 }
+function getViewportBounds() {
+  const vv = window.visualViewport;
+  const top = vv ? vv.offsetTop : 0;
+  const left = vv ? vv.offsetLeft : 0;
+  const width = vv ? vv.width : window.innerWidth;
+  const height = vv ? vv.height : window.innerHeight;
+  const tb = document.getElementById("topbar");
+  const tbBottom = tb ? Math.max(0, tb.getBoundingClientRect().bottom) : 0;
+  return {
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    headerBottom: Math.max(top, tbBottom) + 6,
+  };
+}
 function positionReactionWho() {
   if (!rxWhoPill || !rxWhoPill.isConnected) { closeReactionWho(); return; }
   const r = rxWhoPill.getBoundingClientRect();
   const w = rxWhoPop.offsetWidth, h = rxWhoPop.offsetHeight;
   if (!w || !h) return;
   const gap = 12;
-  // Never sit on top of the app header - prefer dropping below the pill.
-  const tb = document.getElementById("topbar");
-  const limit = (tb ? Math.max(0, tb.getBoundingClientRect().bottom) : 0) + 6;
+  const vp = getViewportBounds();
+  const limit = vp.headerBottom;
   const above = r.top - gap - h;
   let top, below = false;
-  if (above >= limit) top = Math.min(above, window.innerHeight - h - 6);
-  else if (r.bottom + gap + h <= window.innerHeight - 6) { top = r.bottom + gap; below = true; }
-  else top = Math.max(limit, Math.min(above, window.innerHeight - h - 6));
+  if (above >= limit) top = Math.min(above, vp.bottom - h - 6);
+  else if (r.bottom + gap + h <= vp.bottom - 6) { top = r.bottom + gap; below = true; }
+  else top = Math.max(limit, Math.min(above, vp.bottom - h - 6));
   let left = r.left + r.width / 2 - w / 2;
-  left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+  left = Math.max(vp.left + 8, Math.min(left, vp.right - w - 8));
   rxWhoPop.style.left = Math.round(left) + "px";
   rxWhoPop.style.top = Math.round(top) + "px";
   rxWhoPop.classList.toggle("below", below);
@@ -8512,13 +8569,15 @@ function positionReactionBar() {
   const w = rxBar.offsetWidth, h = rxBar.offsetHeight;
   if (!w || !h) return;
   const gap = 14;
+  const vp = getViewportBounds();
+  const limit = vp.headerBottom;
   const above = r.top - gap - h;
   let top, below = false;
-  if (above >= 6) top = above;
-  else if (r.bottom + gap + h <= window.innerHeight - 6) { top = r.bottom + gap; below = true; }
-  else top = Math.max(6, Math.min(above, window.innerHeight - h - 6));
+  if (above >= limit) top = Math.min(above, vp.bottom - h - 6);
+  else if (r.bottom + gap + h <= vp.bottom - 6) { top = r.bottom + gap; below = true; }
+  else top = Math.max(limit, Math.min(above, vp.bottom - h - 6));
   let left = r.left + r.width / 2 - w / 2;
-  left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+  left = Math.max(vp.left + 8, Math.min(left, vp.right - w - 8));
   rxBar.style.left = Math.round(left) + "px";
   rxBar.style.top = Math.round(top) + "px";
   rxBar.classList.toggle("below", below);
@@ -8589,14 +8648,16 @@ function positionEmojiPicker() {
   const r = bubble.getBoundingClientRect();
   const w = rxPick.offsetWidth, h = rxPick.offsetHeight;
   if (!w || !h) return;
-  const gap = 12, sw = window.innerWidth, sh = window.innerHeight;
+  const gap = 12;
+  const vp = getViewportBounds();
+  const limit = vp.headerBottom;
   const above = r.top - gap - h;
   let top, below = false;
-  if (above >= 6) top = above;
-  else if (r.bottom + gap + h <= sh - 6) { top = r.bottom + gap; below = true; }
-  else top = Math.max(6, Math.min(above, sh - h - 6));
+  if (above >= limit) top = Math.min(above, vp.bottom - h - 6);
+  else if (r.bottom + gap + h <= vp.bottom - 6) { top = r.bottom + gap; below = true; }
+  else top = Math.max(limit, Math.min(above, vp.bottom - h - 6));
   let left = r.left + r.width / 2 - w / 2;
-  left = Math.max(8, Math.min(left, sw - w - 8));
+  left = Math.max(vp.left + 8, Math.min(left, vp.right - w - 8));
   rxPick.style.left = Math.round(left) + "px";
   rxPick.style.top = Math.round(top) + "px";
   rxPick.classList.toggle("below", below);
@@ -8702,11 +8763,24 @@ scrollCtnEl.addEventListener("scroll", () => {
   if (rxWhoOpen()) closeReactionWho();
   if (rxPickOpen()) closeEmojiPicker();
 }, { passive: true });
-window.addEventListener("resize", () => {
+function syncVisualViewport() {
+  if (!isDesk() && window.visualViewport) {
+    document.documentElement.style.setProperty("--vvh", Math.round(window.visualViewport.height) + "px");
+    if (window.scrollY !== 0) window.scrollTo(0, 0);
+  } else {
+    document.documentElement.style.removeProperty("--vvh");
+  }
   if (rxBarOpen()) positionReactionBar();
   if (rxWhoOpen()) positionReactionWho();
   if (rxPickOpen()) positionEmojiPicker();
-});
+  if (appHost.classList.contains("panel-open")) syncPanelRaise();
+  if (typeof stickyPlace === "function") stickyPlace();
+}
+window.addEventListener("resize", syncVisualViewport);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", syncVisualViewport);
+  window.visualViewport.addEventListener("scroll", syncVisualViewport);
+}
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (rxBarOpen()) closeReactionBar();
