@@ -502,7 +502,8 @@ function fmtDatePill(d) {
   const diff = Math.round((today - day) / 86400000);
   if (diff === 0) return "Today";
   if (diff === 1) return "Yesterday";
-  return d.toLocaleDateString("en-US", { month: "long" }) + " " + d.getDate();
+  const base = d.toLocaleDateString("en-US", { month: "long" }) + " " + d.getDate();
+  return d.getFullYear() !== now.getFullYear() ? base + ", " + d.getFullYear() : base;
 }
 
 let toastTimer = null;
@@ -726,7 +727,18 @@ function stickyShow() {
   const kids = list.children;
   for (let i = 0; i < kids.length; i++) {
     const n = kids[i];
-    if (!n.classList || !n.classList.contains("msg")) continue;
+    if (!n.classList) continue;
+    // If an in-flow date capsule is already visible right at the top of the viewport,
+    // avoid doubling it up with the floating sticky pill.
+    if (n.classList.contains("daySep")) {
+      const sr = n.getBoundingClientRect();
+      if (sr.bottom > visibleTop && sr.top < visibleTop + 48) {
+        stickyHideNow();
+        return;
+      }
+      continue;
+    }
+    if (!n.classList.contains("msg")) continue;
     const ts = Number(n.dataset && n.dataset.ts) || 0;
     if (!ts) continue;
     label = fmtDatePill(new Date(ts));
@@ -933,14 +945,37 @@ const DM_UNREAD_KEY = "tgDmUnread_" + (window.generatorName || "chat");
 const dmUnreadMap = (() => {
   try { const o = JSON.parse(lsGet(DM_UNREAD_KEY) || "{}"); return (o && typeof o === "object") ? o : {}; } catch (e) { return {}; }
 })();
+const dmUnreadBumpAt = {};
 function saveDmUnread() { try { lsSet(DM_UNREAD_KEY, JSON.stringify(dmUnreadMap)); } catch (e) {} }
-function dmUnreadTotal() { let n = 0; for (const k of Object.keys(dmUnreadMap)) n += Number(dmUnreadMap[k]) || 0; return n; }
+function roomUnreadTotal() {
+  return Math.max(0, Number(unreadCount) || 0);
+}
+function dmUnreadTotal() {
+  if (!dmAllowed()) return 0;
+  let n = 0;
+  for (const k of Object.keys(dmUnreadMap)) {
+    if (!canDm(k)) continue;
+    const v = Math.max(0, Number(dmUnreadMap[k]) || 0);
+    if (v > 0) n += v;
+  }
+  return n;
+}
+function updateFolderBadges() {
+  const roomNotif = roomUnreadTotal();
+  const privateNotif = dmAllowed() ? dmUnreadTotal() : 0;
+  const allNotif = roomNotif + privateNotif;
+  const c1 = setFolderBadge(cfBadgeAll, allNotif);
+  const c2 = setFolderBadge(cfBadgePrivate, privateNotif);
+  const c3 = setFolderBadge(cfBadgeRoom, roomNotif);
+  if (c1 || c2 || c3) requestAnimationFrame(() => syncFolderIndicator(false));
+}
 function updateBackBadge() {
   const dmN = dmAllowed() ? dmUnreadTotal() : 0;
-  const roomN = convo.mode !== "room" ? Math.max(0, Number(unreadCount) || 0) : 0;
+  const roomN = convo.mode !== "room" ? roomUnreadTotal() : 0;
   const n = dmN + roomN;
   backBadge.textContent = n > 99 ? "99+" : String(n);
   backBadge.classList.toggle("hide", n === 0);
+  updateFolderBadges();
 }
 
 let convo = { mode: "room", peer: "" };   // "room" | "people" | "dm"
@@ -1137,10 +1172,16 @@ function buildPreviewEl(sender, text) {
   return prev;
 }
 function setFolderBadge(node, count) {
-  if (!node) return;
+  if (!node) return false;
   const n = Math.max(0, Number(count) || 0);
-  node.textContent = n > 999 ? "999+" : String(n);
-  node.classList.toggle("hide", n === 0);
+  const txt = n > 999 ? "999+" : String(n);
+  const hidden = n === 0;
+  const changed = node.textContent !== txt || node.classList.contains("hide") !== hidden;
+  node.textContent = txt;
+  node.classList.toggle("hide", hidden);
+  if (!hidden) node.title = n === 1 ? "1 unread notification" : n + " unread notifications";
+  else node.removeAttribute("title");
+  return changed;
 }
 
 /* The admin's one place to hand out verification: people who are online but
@@ -1354,14 +1395,9 @@ function renderPeopleList(animateTabs) {
     ? adminDmThreads.filter((t) => t && t.a && t.b && t.a !== myName && t.b !== myName && (match(t.a) || match(t.b)))
     : [];
 
-  // Update live folder notification badges (unread counts only, never total chat counts).
+  // Update live folder notification badges (unread notification counts only).
   const allowed = dmAllowed();
-  const roomNotif = Math.max(0, Number(unreadCount) || 0);
-  const privateNotif = allowed ? dmUnreadTotal() : 0;
-  const allNotif = roomNotif + privateNotif;
-  setFolderBadge(cfBadgeAll, allNotif);
-  setFolderBadge(cfBadgePrivate, privateNotif);
-  setFolderBadge(cfBadgeRoom, roomNotif);
+  updateFolderBadges();
   if (animateTabs) {
     syncFolderIndicator(true);
   } else {
@@ -1441,17 +1477,34 @@ async function refreshPeople() {
     const r = JSON.parse(await socket.rpc.getDmThreads(""));
     if (Array.isArray(r)) {
       dmThreads = r.filter((t) => t && t.peer);
+      const nowMs = Date.now();
       for (const t of dmThreads) {
+        if (!canDm(t.peer)) {
+          delete dmUnreadMap[t.peer];
+          delete dmUnreadBumpAt[t.peer];
+          t.unread = 0;
+          continue;
+        }
         const viewingThisDm = convo.mode === "dm" && convo.peer === t.peer && document.visibilityState !== "hidden" && isNearBottom();
-        const u = viewingThisDm ? 0 : (Number(t.unread) || 0);
+        let u = viewingThisDm ? 0 : Math.max(0, Number(t.unread) || 0);
+        // Preserve a just-arrived realtime DM notification while its row finishes persisting.
+        if (!viewingThisDm && dmUnreadBumpAt[t.peer] && (nowMs - dmUnreadBumpAt[t.peer]) < 6000) {
+          u = Math.max(u, Math.max(0, Number(dmUnreadMap[t.peer]) || 0));
+        }
         if (u) dmUnreadMap[t.peer] = u; else delete dmUnreadMap[t.peer];
         t.unread = u;
       }
       // Drop read marks whose conversation no longer exists (deleted on the
       // other side, wiped by a clear, or a peer who was un-verified), so a
       // stale badge can never sit on a row with no thread behind it.
-      const live = new Set(dmThreads.map((t) => t.peer));
-      for (const k of Object.keys(dmUnreadMap)) if (!live.has(k)) delete dmUnreadMap[k];
+      const live = new Set(dmThreads.filter((t) => canDm(t.peer)).map((t) => t.peer));
+      for (const k of Object.keys(dmUnreadMap)) {
+        const recentBump = dmUnreadBumpAt[k] && (nowMs - dmUnreadBumpAt[k]) < 6000;
+        if (!canDm(k) || (!live.has(k) && !recentBump)) {
+          delete dmUnreadMap[k];
+          delete dmUnreadBumpAt[k];
+        }
+      }
       saveDmUnread();
       updateBackBadge();
     }
@@ -1512,6 +1565,9 @@ async function showRoom() {
   applyHeader();
   if (roomHistoryStale) { roomHistoryStale = false; await reloadChatHistory(); }
   if (convo.mode !== "room") return;
+  updateBubbleTails();
+  scheduleDaySeps();
+  scheduleReplyCounts();
   const computedUnread = addNewMsgsBanner();
   if (computedUnread > 0 || lastSeenAt > 0) unreadCount = computedUnread;
   if (unreadCount) {
@@ -1519,6 +1575,11 @@ async function showRoom() {
     showUnreadChip(unreadCount);
     if (!scrollToNewBanner(false)) scrollBottom(true);
     requestAnimationFrame(syncUnreadChipArrow);
+    setTimeout(() => {
+      if (convo.mode === "room" && document.visibilityState !== "hidden" && isNearBottom() && unreadCount) {
+        clearUnreadState();
+      }
+    }, 950);
   } else {
     unreadChipBtn.classList.add("hide");
     scrollBottom(true);
@@ -1585,12 +1646,14 @@ async function openDm(name) {
     reclassifyOwnership();
     updateBubbleTails();
     scheduleDaySeps();
+    scheduleReplyCounts();
     scrollCtnEl.scrollTop = dmScrollTops.get(peer) || 0;
     updateScrollBtn();
   } else {
     dmMessagesEl.appendChild(el("div", "pEmpty", "Loading\u2026"));
   }
   delete dmUnreadMap[peer];
+  delete dmUnreadBumpAt[peer];
   for (const t of dmThreads) if (t.peer === peer) t.unread = 0;
   saveDmUnread();
   updateBackBadge();
@@ -1654,6 +1717,7 @@ function markDmRead(force) {
   if (convo.mode !== "dm") return;
   if (dmUnreadMap[convo.peer]) {
     delete dmUnreadMap[convo.peer];
+    delete dmUnreadBumpAt[convo.peer];
     for (const t of dmThreads) if (t.peer === convo.peer) t.unread = 0;
     saveDmUnread();
     updateBackBadge();
@@ -1678,6 +1742,7 @@ function updateDmThreadPreview(peer, m) {
 
 function bumpDmUnread(peer, m) {
   dmUnreadMap[peer] = (Number(dmUnreadMap[peer]) || 0) + 1;
+  dmUnreadBumpAt[peer] = Date.now();
   saveDmUnread();
   updateBackBadge();
   updateDmThreadPreview(peer, m);
@@ -1802,6 +1867,7 @@ function dropDmLocal(peer) {
   dmDom.delete(peer);
   dmScrollTops.delete(peer);
   delete dmUnreadMap[peer];
+  delete dmUnreadBumpAt[peer];
   saveDmUnread();
   updateBackBadge();
   dmThreads = dmThreads.filter((t) => t.peer !== peer);
@@ -1909,6 +1975,7 @@ const PAUSE_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="current
 const DEL_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9.5 7V5.5A1.5 1.5 0 0 1 11 4h2a1.5 1.5 0 0 1 1.5 1.5V7M6.5 7l.8 12a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4l.8-12M10 11v6M14 11v6"/></svg>';
 const DELNOTE_SVG = '<svg fill="currentColor" viewBox="0 0 1920 1920" xmlns="http://www.w3.org/2000/svg"><path d="M213.333 960c0-167.36 56-321.707 149.44-446.4L1406.4 1557.227c-124.693 93.44-279.04 149.44-446.4 149.44-411.627 0-746.667-335.04-746.667-746.667m1493.334 0c0 167.36-56 321.707-149.44 446.4L513.6 362.773c124.693-93.44 279.04-149.44 446.4-149.44 411.627 0 746.667 335.04 746.667 746.667M960 0C429.76 0 0 429.76 0 960s429.76 960 960 960 960-429.76 960-960S1490.24 0 960 0" fill-rule="evenodd"></path></svg>';
 const REPLY_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19l-7-7 7-7M2 12h13a7 7 0 0 1 7 7v1"/></svg>';
+const REPLY_COUNT_SVG = '<svg viewBox="0 0 20 20" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M8.5 5.2V2.6a.6.6 0 0 0-1-.45L1.75 7.45a.7.7 0 0 0 0 1.04l5.75 5.3a.6.6 0 0 0 1-.44v-2.7c3.95 0 6.55 1.25 8.4 4.1.2.32.7.15.65-.23-.55-4.8-3.4-9.32-9.05-9.32z"/></svg>';
 const EDIT_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/></svg>';
 const DL_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>';
 const PIN_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l1 7 3 3v2H5v-2l3-3z"/><path d="M12 16v5"/></svg>';
@@ -4831,6 +4898,108 @@ function scheduleDaySeps() {
   queueMicrotask(() => { daySepQueued = false; refreshDaySeps(); });
 }
 
+/* ---------- reply count indicator (Telegram-style "N ↩" in .tsrow) ----------
+   Counts how many rendered messages in the active conversation reply to each
+   message and displays `N ↩` right before the timestamp whenever N >= 1.
+   Clicking the badge cycles smoothly through those replies. */
+function refreshReplyCounts(host) {
+  const box = host || messagesEl;
+  if (!box) return;
+  const byId = new Map();
+  const entries = [];
+  for (const n of box.children) {
+    if (!n.classList || !n.classList.contains("msg")) continue;
+    const id = n.dataset && n.dataset.id ? String(n.dataset.id) : "";
+    if (id) byId.set(id, n);
+    entries.push({
+      wrap: n,
+      from: (n.dataset && n.dataset.from) || "",
+      ts: Number(n.dataset && n.dataset.ts) || 0,
+      m: msgByWrap.get(n) || null
+    });
+  }
+  const replyMap = new Map();
+  for (const e of entries) {
+    const r = e.m && e.m.replyTo;
+    if (!r) continue;
+    const rid = String(r.id || "");
+    const resolvedId = String(r.resolvedId || "");
+    let target = (rid && byId.get(rid)) || (resolvedId && byId.get(resolvedId)) || null;
+    if (target === e.wrap) target = null;
+    if (!target) {
+      const rts = Number(r.ts) || 0;
+      const rfrom = String(r.from || "");
+      if (rts) {
+        let bestDiff = Infinity;
+        for (const cand of entries) {
+          if (cand.wrap === e.wrap || !cand.ts) continue;
+          const diff = Math.abs(cand.ts - rts);
+          if (rfrom && cand.from === rfrom && diff === 0) { target = cand.wrap; break; }
+          if (rfrom && cand.from === rfrom && diff <= 2000 && diff < bestDiff) { target = cand.wrap; bestDiff = diff; }
+          else if (!rfrom && diff <= 1500 && diff < bestDiff) { target = cand.wrap; bestDiff = diff; }
+        }
+      }
+    }
+    if (!target) continue;
+    let list = replyMap.get(target);
+    if (!list) { list = []; replyMap.set(target, list); }
+    list.push(e.wrap);
+  }
+  let layoutChanged = false;
+  for (const e of entries) {
+    const replies = replyMap.get(e.wrap);
+    const count = replies ? replies.length : 0;
+    const ts = e.wrap.querySelector(".tsrow");
+    if (!ts) continue;
+    let badge = ts.querySelector(".tsReplyCount");
+    if (!count) {
+      if (badge) { badge.remove(); layoutChanged = true; }
+      continue;
+    }
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "tsReplyCount";
+      badge.setAttribute("role", "button");
+      badge.tabIndex = 0;
+      const jump = (ev) => {
+        if (selectionMode) return;
+        ev.stopPropagation();
+        const arr = (badge._replies || []).filter((node) => node && node.isConnected);
+        if (!arr.length) return;
+        const idx = Number(badge._idx) || 0;
+        const nextNode = arr[idx % arr.length];
+        badge._idx = (idx + 1) % arr.length;
+        nextNode.scrollIntoView({ block: "center", behavior: "smooth" });
+        nextNode.classList.add("flash");
+        setTimeout(() => nextNode.classList.remove("flash"), 1300);
+      };
+      badge.addEventListener("click", jump);
+      badge.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); jump(ev); }
+      });
+      const anchor = ts.querySelector(".editedMark") || ts.querySelector(".tsTime");
+      if (anchor) ts.insertBefore(badge, anchor);
+      else ts.appendChild(badge);
+      layoutChanged = true;
+    }
+    badge._replies = replies;
+    if (badge.dataset.count !== String(count)) {
+      badge.dataset.count = String(count);
+      badge.innerHTML = '<span class="tsReplyNum">' + count + "</span>" + REPLY_COUNT_SVG;
+      badge.title = count === 1 ? "1 reply" : count + " replies";
+      badge.setAttribute("aria-label", badge.title);
+      layoutChanged = true;
+    }
+  }
+  if (layoutChanged) scheduleLongSync();
+}
+let replyCountsQueued = false;
+function scheduleReplyCounts() {
+  if (replyCountsQueued) return;
+  replyCountsQueued = true;
+  queueMicrotask(() => { replyCountsQueued = false; refreshReplyCounts(); });
+}
+
 function buildDelNote(m) {
   const mine = isMine(m);
   const wrap = el("div", "msg " + (mine ? "out" : "in"));
@@ -4980,7 +5149,7 @@ function senderIsBanned(from) {
   return false;
 }
 const CLOCK_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
-const tailObserver = new MutationObserver(() => { updateBubbleTails(); scheduleDaySeps(); });
+const tailObserver = new MutationObserver(() => { updateBubbleTails(); scheduleDaySeps(); scheduleReplyCounts(); });
 tailObserver.observe(messagesEl, { childList: true });
 function translateRealtimeMessage(m, wrap) {
   if (!translateOn || !wrap) return;
@@ -5324,6 +5493,7 @@ function handleMessage(m) {
         unreadCount++;
         ensureUnreadBanner(wrap);
         showUnreadChip(unreadCount);
+        updateBackBadge();
         updateScrollBtn();
       }
     } else if (atRoom) {
@@ -5351,6 +5521,8 @@ function handleMessage(m) {
     // region), so any open one is closed rather than left on screen.
     msgByWrapCleanup(roomMessagesEl);
     roomMessagesEl.textContent = "";
+    unreadCount = 0;
+    unreadChipBtn.classList.add("hide");
     for (const peer of [...dmDom.keys()]) {
       const hold = dmDom.get(peer);
       if (hold) { msgByWrapCleanup(hold); hold.textContent = ""; }
@@ -5358,6 +5530,7 @@ function handleMessage(m) {
     dmDom.clear();
     dmScrollTops.clear();
     for (const k of Object.keys(dmUnreadMap)) delete dmUnreadMap[k];
+    for (const k of Object.keys(dmUnreadBumpAt)) delete dmUnreadBumpAt[k];
     saveDmUnread();
     updateBackBadge();
     dmThreads = [];
@@ -5368,8 +5541,20 @@ function handleMessage(m) {
   } else if (m.t === "del") {
     const n = findMsgDom(String(m.id || ""), m.from || null, m.mts != null ? Number(m.mts) : null);
     if (n) {
+      const wasUnread = unreadCount > 0 && !n.classList.contains("out") && Number(n.dataset.ts) > lastSeenAt;
       if (n.dataset.ts && n.dataset.from) { sbDeleteBy(n.dataset.ts, n.dataset.from); rxKvDrop(n.dataset.from, n.dataset.ts); }
       n.remove();
+      if (wasUnread) {
+        unreadCount = Math.max(0, unreadCount - 1);
+        if (!unreadCount) {
+          unreadChipBtn.classList.add("hide");
+          roomMessagesEl.querySelectorAll(".unreadBanner").forEach((b) => b.remove());
+        } else if (convo.mode === "room") {
+          showUnreadChip(unreadCount);
+        }
+        updateBackBadge();
+        refreshListView();
+      }
     }
     // Keep an open admin panel's archive list current.
     if (isAdmin() && !adminSide.classList.contains("hide")) loadDeletedMessages();
@@ -6216,6 +6401,7 @@ async function reloadChatHistoryAsync() {
     typers.clear();
     unreadCount = 0;
     unreadChipBtn.classList.add("hide");
+    updateBackBadge();
     endSelection();
     historyLoaded = false;
     allOlderLoaded = false;
@@ -6470,8 +6656,13 @@ window.addEventListener("visibilitychange", () => {
     if (socket && socket.readyState !== 1 && !socket._reconnectDone) scheduleReconnect(socket);
     if (convo.mode === "dm" && isNearBottom()) markDmRead(true);
     else if (convo.mode === "room" && unreadCount) {
-      bannerJumpUntil = Date.now() + 2000;
+      bannerJumpUntil = Date.now() + 1500;
       syncUnreadChipArrow();
+      setTimeout(() => {
+        if (convo.mode === "room" && document.visibilityState !== "hidden" && isNearBottom() && unreadCount) {
+          clearUnreadState();
+        }
+      }, 1550);
     }
   }
 });

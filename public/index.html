@@ -171,6 +171,23 @@
   }
   #app.selMode .msg.selected { background: rgba(255, 255, 255, 0.32); }
   body.dark #app.selMode .msg.selected { background: rgba(255, 255, 255, 0.26); }
+  /* Merge adjacent selected messages seamlessly with zero gap (while keeping
+     natural separation whenever a date capsule, system log, or banner sits in between). */
+  #app.selMode .msg.selected + .msg.selected:not(.grouped) {
+    margin-top: -5px;
+    padding-top: 5px;
+  }
+  #app.selMode .msg.selected + .msg.selected.grouped {
+    margin-top: -5px;
+    padding-top: 2px;
+  }
+  #app.selMode .msg.selected + .msg.selected:not(.grouped) .selCheck {
+    top: calc(50% + 2.5px);
+  }
+  #app.selMode .msg.selected + .msg.selected.grouped .selCheck {
+    top: calc(50% + 1px);
+  }
+  #app.selMode .tsReplyCount { pointer-events: none; }
   .selCheck {
     position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
     width: 22px; height: 22px; border-radius: 50%;
@@ -394,10 +411,16 @@
     text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
   }
   .sep { align-self: center; margin: 3px 0 7px; }
-  /* In-flow day pills are superseded by the floating indicator below: their
-     data/logic (dayKey/fmtDatePill/refreshDaySeps) is reused as the floating
-     pill's source, but they never render between messages. */
-  .sep.daySep { display: none !important; }
+  .sep.daySep {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    padding: 4px 14px;
+    margin: 6px 0 8px;
+    user-select: none;
+    pointer-events: none;
+  }
   /* Floating date pill: pinned to the top of the chat while scrolling (same
      look as the in-list day separators). Zero-height so it never shifts the
      messages; shown on scroll, auto-hidden after 3s idle. */
@@ -725,6 +748,30 @@
   }
   .msg.out .tsrow { color: #7a9eb8; }
   .msg.out .tsrow svg { color: #2678b6; }
+  .tsReplyCount {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-right: 4px;
+    color: inherit;
+    font-size: 10.5px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.92;
+    transition: opacity 0.14s ease;
+  }
+  .tsReplyCount:hover { opacity: 1; }
+  .tsReplyCount svg {
+    display: block;
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    color: currentColor !important;
+  }
+  .imgBubble .tsrow:not(.tsrow-flat) .tsReplyCount { color: #ececf1; }
+  .imgBubble .tsrow:not(.tsrow-flat) .tsReplyCount svg { color: #ececf1 !important; }
 
   /* ---------- typing indicator bubble ----------
      Shared bubble tag with messages: the dots bubble reuses .bubble so sent/
@@ -1347,7 +1394,8 @@
   .tsrow .transTog { order: -1; }
   .bubble.has-tog { display: flex; flex-direction: column; }
   .bubble.has-tog > .tsrow { align-self: stretch; }
-  .bubble.has-tog > .tsrow .tsTime { margin-left: auto; }
+  .bubble.has-tog > .tsrow .transTog { margin-right: auto; }
+  .bubble.has-tog > .tsrow .tsTime { margin-left: 0; }
   .msg.out .transTog { color: #a9c6de; }
   .transTog:hover { text-decoration: underline; }
 
@@ -3049,6 +3097,7 @@
     100% { background: transparent; }
   }
   body.dark .sep, body.dark .sys span { background: rgba(31, 31, 33, 0.72); backdrop-filter: blur(12px) saturate(150%); -webkit-backdrop-filter: blur(12px) saturate(150%); color: #d1d1d6; }
+  body.dark .sep.daySep { background: rgba(31, 31, 33, 0.74); color: #e5e5ea; border: 1px solid rgba(255, 255, 255, 0.06); }
   body.dark #stickyDate { background: rgba(31, 31, 33, 0.78); color: #e5e5ea; border: 1px solid rgba(255, 255, 255, 0.08); }
   body.dark .unreadBanner { background: #1f1f21; color: #a08ef9; border: 1px solid rgba(255, 255, 255, 0.08); }
   body.dark .unreadBanner svg { color: #98989f; }
