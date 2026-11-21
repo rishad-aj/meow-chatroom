@@ -19,7 +19,7 @@
 <link rel="dns-prefetch" href="https://media4.giphy.com">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=JetBrains+Mono:wght@400;500&family=Nunito:wght@700;800&display=swap" rel="stylesheet">
 <link rel="modulepreload" href="./shim.js">
 <link rel="modulepreload" href="./app.js">
 <link rel="manifest" href="https://user.uploads.dev/file/25455502383c588f70e0be7cce93247d.json">
@@ -28,6 +28,7 @@
   :root {
     --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --font-avatar: "Nunito", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
@@ -43,6 +44,9 @@
     overflow: hidden;
   }
   button, input, textarea, select { font-family: var(--font-sans); }
+  #avatar, #avatarLetter, .pAvatar, .msgAvatar, .olAvatar, .mAv, .rxWhoAva, .pfpPreview {
+    font-family: var(--font-avatar);
+  }
   .hide { display: none !important; }
   /* ---------- no-zoom guards ---------- */
   #app, #app * { touch-action: manipulation; }
@@ -3783,8 +3787,8 @@
     display: flex; align-items: center; gap: 4px;
   }
   body.dark .pPreview { color: #98989f; }
-  .pSender { color: #1c1c1e; font-weight: 600; flex-shrink: 0; }
-  body.dark .pSender { color: #f0f0f4; font-weight: 600; }
+  .pSender { color: #2678b6; font-weight: 400; flex-shrink: 0; }
+  body.dark .pSender { color: #ffffff; font-weight: 400; }
   .pPreviewText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
   .pFwdIco { display: inline-flex; align-items: center; flex-shrink: 0; opacity: 0.9; }
   .pPin { display: inline-flex; align-items: center; justify-content: center; color: #8e8e93; margin-left: auto; flex-shrink: 0; }
@@ -3825,7 +3829,7 @@
     background: rgba(38, 120, 182, 0.19) !important;
   }
   .pRow.active .pName { color: #111111; }
-  .pRow.active .pSender { color: #1c1c1e; }
+  .pRow.active .pSender { color: #2678b6; }
   .pRow.active .pTime { color: #4e6c85; }
   .pRow.active .pTick { color: #2678b6; }
   .pRow.active .pPin,
