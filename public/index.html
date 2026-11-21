@@ -11,6 +11,12 @@
 <link rel="preconnect" href="https://yvqndfyiwkegxkeolvoh.supabase.co" crossorigin>
 <link rel="preconnect" href="https://esm.sh" crossorigin>
 <link rel="preconnect" href="https://user.uploads.dev" crossorigin>
+<link rel="preconnect" href="https://api.giphy.com" crossorigin>
+<link rel="dns-prefetch" href="https://media0.giphy.com">
+<link rel="dns-prefetch" href="https://media1.giphy.com">
+<link rel="dns-prefetch" href="https://media2.giphy.com">
+<link rel="dns-prefetch" href="https://media3.giphy.com">
+<link rel="dns-prefetch" href="https://media4.giphy.com">
 <link rel="modulepreload" href="./shim.js">
 <link rel="modulepreload" href="./app.js">
 <link rel="manifest" href="https://user.uploads.dev/file/25455502383c588f70e0be7cce93247d.json">
@@ -1048,7 +1054,7 @@
     border-radius: 22px;
   }
   /* ---------- bounded GIF playback (canvas replaces the <img>) ---------- */
-  .gifWrap { position: relative; line-height: 0; }
+  .gifWrap { position: relative; line-height: 0; contain: layout style paint; }
   .bubble.imgBubble .gifCanvas {
     display: block;
     width: 100%;
@@ -1056,6 +1062,7 @@
     border-radius: 22px;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
+    transform: translateZ(0);
   }
   .gifPauseBadge {
     position: absolute;
@@ -2534,6 +2541,7 @@
     cursor: pointer;
     border: none;
     padding: 0;
+    contain: layout style paint;
   }
   #gifGrid .gifCell img {
     width: 100%;

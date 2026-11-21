@@ -4605,19 +4605,91 @@ function addVoiceBubble(m) {
   return w;
 }
 
-/* ---------- bounded GIF playback ----------
-   Animated GIFs are decoded with the native ImageDecoder and drawn onto a canvas
-   so their playback can be bounded: each one plays GIF_LOOPS full passes, then
-   holds on the last frame behind a badge. Clicking it replays another GIF_LOOPS
-   passes; double-clicking opens the lightbox. Where ImageDecoder is missing (or
-   the file isn't actually animated) the plain <img> keeps looping as before. */
+/* ---------- fast bounded GIF playback ----------
+   - Giphy GIFs play via hardware-decoded <video> (.mp4, ~10-15x smaller than .gif)
+     with instant static poster, bounded GIF_LOOPS passes, click-to-replay,
+     double-click lightbox, and automatic fallback to <img>/ImageDecoder on error.
+   - Other animated GIFs/WebPs decode each frame once into GPU ImageBitmaps (when
+     within budget) and animate on a vsync requestAnimationFrame loop.
+   - All GIFs (video + canvas) automatically pause when scrolled off-screen or when
+     the tab is hidden, using zero CPU/GPU in the background. */
 const GIF_LOOPS = 4;
 const GIF_ZERO_DELAY = 100;
 const GIF_MIN_DELAY = 20;
 const GIF_MAX_DELAY = 8000;
-const GIF_MAX_DIM = 720;
-const GIF_BADGE_SVG = `<svg viewBox="0 0 46 46" width="46" height="46" xmlns="http://www.w3.org/2000/svg"><circle cx="23" cy="23" r="23" fill="rgba(232,232,236,0.78)"/><text x="23" y="27" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="11" font-weight="800" letter-spacing="0.5" fill="#5b5b60">GIF</text></svg>`
+const GIF_MAX_DIM = 480;
+const GIF_CACHE_MAX = 8;
+const GIF_BITMAP_MAX_FRAMES = 120;
+const GIF_BITMAP_MAX_PIXELS = 18000000;
+const GIF_BADGE_SVG = `<svg viewBox="0 0 46 46" width="46" height="46" xmlns="http://www.w3.org/2000/svg"><circle cx="23" cy="23" r="23" fill="rgba(232,232,236,0.78)"/><text x="23" y="27" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="11" font-weight="800" letter-spacing="0.5" fill="#5b5b60">GIF</text></svg>`;
 const gifDecodeCache = new Map();
+const gifActiveCtrls = new Set();
+
+function giphyMediaUrls(url) {
+  if (!url || typeof url !== "string") return null;
+  const m = url.match(/^(https:\/\/media[0-9]*\.giphy\.com\/media\/.+\/)((?:giphy(?:-(?:downsized(?:-(?:medium|large|small))?|preview))?|200w?(?:_d)?|100w?))\.(gif|webp)(\?.*)?$/i);
+  if (!m) return null;
+  const base = m[1], variant = m[2].toLowerCase(), qs = m[4] || "";
+  const isSmall = variant.startsWith("200") || variant.startsWith("100");
+  return {
+    mp4: base + (isSmall ? "200.mp4" : "giphy.mp4") + qs,
+    poster: base + "giphy_s.gif" + qs,
+    webp: base + "giphy.webp" + qs,
+  };
+}
+
+function gifVisibleNow(elNode) {
+  if (document.hidden || !elNode || !elNode.isConnected) return false;
+  if (elNode.offsetParent === null) return false;
+  return true;
+}
+
+const gifVisObs = typeof IntersectionObserver !== "undefined"
+  ? new IntersectionObserver((entries) => {
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const target = entry.target;
+        if (!target.isConnected) {
+          unregisterGifCtrl(target);
+          continue;
+        }
+        const ctrl = target.__gifCtrl;
+        if (!ctrl) continue;
+        ctrl.inView = entry.isIntersecting;
+        if (entry.isIntersecting && !document.hidden) ctrl.onVisible();
+        else ctrl.onHidden();
+      }
+    }, { rootMargin: "180px 0px", threshold: 0.01 })
+  : null;
+
+document.addEventListener("visibilitychange", () => {
+  for (const ctrl of gifActiveCtrls) {
+    if (!ctrl.el || !ctrl.el.isConnected) {
+      if (gifVisObs && ctrl.el) gifVisObs.unobserve(ctrl.el);
+      gifActiveCtrls.delete(ctrl);
+      continue;
+    }
+    if (document.hidden) ctrl.onHidden();
+    else if (ctrl.inView) ctrl.onVisible();
+  }
+});
+
+function registerGifCtrl(elNode, ctrl) {
+  ctrl.el = elNode;
+  ctrl.inView = !gifVisObs;
+  elNode.__gifCtrl = ctrl;
+  gifActiveCtrls.add(ctrl);
+  if (gifVisObs) gifVisObs.observe(elNode);
+  else if (!document.hidden) ctrl.onVisible();
+}
+
+function unregisterGifCtrl(elNode) {
+  const ctrl = elNode && elNode.__gifCtrl;
+  if (!ctrl) return;
+  if (gifVisObs) gifVisObs.unobserve(elNode);
+  gifActiveCtrls.delete(ctrl);
+  delete elNode.__gifCtrl;
+}
 
 function gifFrameMs(us) {
   const ms = Number(us) / 1000;
@@ -4627,20 +4699,28 @@ function gifFrameMs(us) {
 
 async function gifBytes(url) {
   try {
-    const r = await fetch(url, { mode: "cors" });
+    const r = await fetch(url, { mode: "cors", cache: "force-cache" });
     if (r.ok) {
       const b = await r.arrayBuffer();
       if (b && b.byteLength) return b;
     }
   } catch (e) {}
-  try {
-    const r = await root.superFetch(url);
-    if (r && r.ok !== false) {
-      const b = await r.arrayBuffer();
-      if (b && b.byteLength) return b;
-    }
-  } catch (e) {}
   return null;
+}
+
+function closeGifInfo(infoPromise) {
+  if (!infoPromise) return;
+  Promise.resolve(infoPromise).then((info) => {
+    if (!info) return;
+    if (info.bitmaps) {
+      for (let i = 0; i < info.bitmaps.length; i++) {
+        const b = info.bitmaps[i];
+        if (b && b.bmp) { try { b.bmp.close(); } catch (e) {} }
+      }
+      info.bitmaps = null;
+    }
+    if (info.decoder) { try { info.decoder.close(); } catch (e) {} info.decoder = null; }
+  }).catch(() => {});
 }
 
 function gifDecode(url) {
@@ -4661,63 +4741,212 @@ function gifDecode(url) {
       await dec.completed;
       await dec.tracks.ready;
       const track = dec.tracks[0];
-      if (!track || !track.animated || track.frameCount < 2) return null;
+      if (!track || !track.animated || track.frameCount < 2) {
+        try { dec.close(); } catch (e2) {}
+        return null;
+      }
       const first = await dec.decode({ frameIndex: 0 });
       const w = first.image.displayWidth || 0;
       const h = first.image.displayHeight || 0;
+      const d0 = gifFrameMs(first.image.duration);
+      if (!w || !h) {
+        first.image.close();
+        try { dec.close(); } catch (e2) {}
+        return null;
+      }
+      const scale = Math.min(1, GIF_MAX_DIM / Math.max(w, h));
+      const dw = Math.max(1, Math.round(w * scale));
+      const dh = Math.max(1, Math.round(h * scale));
+      const frames = track.frameCount;
+      const canCache = typeof createImageBitmap === "function"
+        && frames <= GIF_BITMAP_MAX_FRAMES
+        && (dw * dh * frames) <= GIF_BITMAP_MAX_PIXELS;
+      const bitmaps = canCache ? new Array(frames) : null;
+      if (canCache) {
+        try {
+          const bmp0 = await createImageBitmap(first.image, { resizeWidth: dw, resizeHeight: dh, resizeQuality: "medium" });
+          bitmaps[0] = { bmp: bmp0, ms: d0 };
+        } catch (e3) {}
+      }
       first.image.close();
-      if (!w || !h) return null;
-      return { decoder: dec, frames: track.frameCount, w, h };
+      return {
+        decoder: dec,
+        frames,
+        w,
+        h,
+        dw,
+        dh,
+        canCache,
+        bitmaps,
+        decodedCount: (bitmaps && bitmaps[0]) ? 1 : 0,
+        pending: new Map(),
+      };
     } catch (e) {
       try { if (dec) dec.close(); } catch (e2) {}
       return null;
     }
   })();
   gifDecodeCache.set(url, p);
-  while (gifDecodeCache.size > 16) gifDecodeCache.delete(gifDecodeCache.keys().next().value);
+  while (gifDecodeCache.size > GIF_CACHE_MAX) {
+    const oldestKey = gifDecodeCache.keys().next().value;
+    const oldestVal = gifDecodeCache.get(oldestKey);
+    gifDecodeCache.delete(oldestKey);
+    closeGifInfo(oldestVal);
+  }
   return p;
 }
 
+function gifGetFrame(info, idx) {
+  if (info.bitmaps && info.bitmaps[idx]) return Promise.resolve(info.bitmaps[idx]);
+  if (info.pending && info.pending.has(idx)) return info.pending.get(idx);
+  if (!info.decoder) return Promise.resolve(null);
+  const pr = info.decoder.decode({ frameIndex: idx }).then(async (f) => {
+    const ms = gifFrameMs(f.image.duration);
+    if (info.canCache && info.bitmaps) {
+      try {
+        const bmp = await createImageBitmap(f.image, { resizeWidth: info.dw, resizeHeight: info.dh, resizeQuality: "medium" });
+        f.image.close();
+        const entry = { bmp, ms };
+        if (!info.bitmaps[idx]) {
+          info.bitmaps[idx] = entry;
+          info.decodedCount++;
+          if (info.decodedCount >= info.frames && info.decoder) {
+            try { info.decoder.close(); } catch (e) {}
+            info.decoder = null;
+          }
+        }
+        return entry;
+      } catch (e) {
+        return { frame: f.image, ms };
+      }
+    }
+    return { frame: f.image, ms };
+  }).catch(() => null).finally(() => {
+    if (info.pending) info.pending.delete(idx);
+  });
+  if (info.pending) info.pending.set(idx, pr);
+  return pr;
+}
+
 function gifPlay(canvas, badge, info) {
-  const st = canvas.__gif || (canvas.__gif = { token: 0 });
-  const token = ++st.token;
-  const alive = () => st.token === token;
-  badge.hidden = true;
+  const st = canvas.__gif || (canvas.__gif = {
+    token: 0,
+    raf: 0,
+    step: 0,
+    finished: false,
+    paused: false,
+    nextDue: 0,
+    curEntry: null,
+  });
+  const total = GIF_LOOPS * info.frames;
   const ctx = canvas.getContext("2d");
   const W = canvas.width, H = canvas.height;
-  const total = GIF_LOOPS * info.frames;
-  // Decode one frame ahead so decode time overlaps the previous frame's delay
-  // (otherwise a slow decode stretches the whole animation).
-  const dec = (i) => info.decoder.decode({ frameIndex: i }).then((f) => {
-    if (!alive()) { try { f.image.close(); } catch (e) {} throw new Error("stopped"); }
-    return f;
-  }).catch(() => null);
-  (async () => {
-    let next = dec(0);
-    for (let n = 0; n < total; n++) {
-      const frame = await next;
-      if (!alive()) return;
-      if (!frame) return;
-      next = (n + 1 < total) ? dec((n + 1) % info.frames) : null;
-      const t0 = performance.now();
-      try { ctx.drawImage(frame.image, 0, 0, W, H); } catch (e) {}
-      const ms = gifFrameMs(frame.image.duration);
-      try { frame.image.close(); } catch (e) {}
-      await new Promise((r) => setTimeout(r, Math.max(0, ms - (performance.now() - t0))));
-      if (!alive()) return;
+
+  const stopRaf = () => {
+    if (st.raf) { cancelAnimationFrame(st.raf); st.raf = 0; }
+  };
+
+  const startLoop = (reset) => {
+    stopRaf();
+    if (reset) {
+      st.step = 0;
+      st.finished = false;
+      badge.hidden = true;
     }
-    if (alive()) badge.hidden = false;
-  })();
+    if (st.finished) return;
+    st.paused = false;
+    const token = ++st.token;
+    const alive = () => st.token === token && !st.paused && canvas.isConnected;
+    st.nextDue = 0;
+    let inFlight = null;
+
+    const kickDecode = (stepIdx) => {
+      if (stepIdx >= total) return null;
+      return gifGetFrame(info, stepIdx % info.frames);
+    };
+    inFlight = kickDecode(st.step);
+
+    const drawAndAdvance = (now, entry) => {
+      if (!alive()) {
+        if (entry && entry.frame) { try { entry.frame.close(); } catch (e) {} }
+        return;
+      }
+      if (!entry) {
+        st.finished = true;
+        badge.hidden = false;
+        return;
+      }
+      try {
+        ctx.clearRect(0, 0, W, H);
+        ctx.drawImage(entry.bmp || entry.frame, 0, 0, W, H);
+      } catch (e) {}
+      if (entry.frame) { try { entry.frame.close(); } catch (e) {} }
+      st.step++;
+      if (st.step >= total) {
+        st.finished = true;
+        badge.hidden = false;
+        return;
+      }
+      st.nextDue = now + entry.ms;
+      inFlight = kickDecode(st.step);
+      st.raf = requestAnimationFrame(tick);
+    };
+
+    const tick = (now) => {
+      st.raf = 0;
+      if (!alive()) return;
+      if (st.nextDue && now < st.nextDue - 4) {
+        st.raf = requestAnimationFrame(tick);
+        return;
+      }
+      const pending = inFlight;
+      inFlight = null;
+      if (!pending) return;
+      pending.then((entry) => {
+        if (!alive()) {
+          if (entry && entry.frame) { try { entry.frame.close(); } catch (e) {} }
+          return;
+        }
+        drawAndAdvance(performance.now(), entry);
+      });
+    };
+
+    st.raf = requestAnimationFrame(tick);
+  };
+
+  st.startLoop = startLoop;
+  st.pause = () => {
+    st.paused = true;
+    st.token++;
+    stopRaf();
+  };
+  st.resume = () => {
+    if (!st.finished && st.paused && canvas.isConnected) startLoop(false);
+  };
+
+  if (gifVisibleNow(canvas) && (!canvas.__gifCtrl || canvas.__gifCtrl.inView)) {
+    startLoop(true);
+  } else {
+    st.step = 0;
+    st.finished = false;
+    st.paused = true;
+    badge.hidden = true;
+    // Draw frame 0 once so the bubble isn't blank while offscreen.
+    gifGetFrame(info, 0).then((entry) => {
+      if (!entry || !canvas.isConnected) return;
+      try { ctx.clearRect(0, 0, W, H); ctx.drawImage(entry.bmp || entry.frame, 0, 0, W, H); } catch (e) {}
+      if (entry.frame) { try { entry.frame.close(); } catch (e) {} }
+    });
+  }
 }
 
 async function setupGifBubble(img, url) {
   const info = await gifDecode(url);
   if (!info || !img.isConnected) return;
-  const scale = Math.min(1, GIF_MAX_DIM / Math.max(info.w, info.h));
   const canvas = document.createElement("canvas");
   canvas.className = "gifCanvas";
-  canvas.width = Math.max(1, Math.round(info.w * scale));
-  canvas.height = Math.max(1, Math.round(info.h * scale));
+  canvas.width = info.dw;
+  canvas.height = info.dh;
   canvas.setAttribute("role", "img");
   canvas.setAttribute("aria-label", "GIF");
   const badge = el("div", "gifPauseBadge");
@@ -4731,21 +4960,144 @@ async function setupGifBubble(img, url) {
   canvas.addEventListener("click", (e) => {
     e.stopPropagation();
     if (inSelMode()) return;
-    gifPlay(canvas, badge, info);
+    if (canvas.__gif && canvas.__gif.startLoop) canvas.__gif.startLoop(true);
+    else gifPlay(canvas, badge, info);
   });
   canvas.addEventListener("dblclick", (e) => {
     e.stopPropagation();
     if (inSelMode()) return;
     openLightbox(url);
   });
+  registerGifCtrl(canvas, {
+    onVisible() { if (canvas.__gif && canvas.__gif.resume) canvas.__gif.resume(); },
+    onHidden() { if (canvas.__gif && canvas.__gif.pause) canvas.__gif.pause(); },
+  });
   gifPlay(canvas, badge, info);
 }
 
+const gifLazyDecodeObs = typeof IntersectionObserver !== "undefined"
+  ? new IntersectionObserver((entries) => {
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        if (!entry.isIntersecting) continue;
+        const img = entry.target;
+        gifLazyDecodeObs.unobserve(img);
+        const url = img.__gifUrl;
+        delete img.__gifUrl;
+        if (url && img.isConnected) {
+          const start = () => { setupGifBubble(img, url).catch(() => {}); };
+          if (img.complete && img.naturalWidth) start();
+          else img.addEventListener("load", start, { once: true });
+        }
+      }
+    }, { rootMargin: "220px 0px", threshold: 0.01 })
+  : null;
+
 function wireGifPlayback(bubble, img, url, isGif) {
   if (!isGif || !url || typeof ImageDecoder === "undefined") return;
-  const start = () => { setupGifBubble(img, url).catch(() => {}); };
-  if (img.complete && img.naturalWidth) start();
-  else img.addEventListener("load", start, { once: true });
+  if (gifLazyDecodeObs) {
+    img.__gifUrl = url;
+    gifLazyDecodeObs.observe(img);
+  } else {
+    const start = () => { setupGifBubble(img, url).catch(() => {}); };
+    if (img.complete && img.naturalWidth) start();
+    else img.addEventListener("load", start, { once: true });
+  }
+}
+
+function buildGiphyVideoWrap(bubble, url, giphy) {
+  const wrap = el("div", "gifWrap");
+  const video = document.createElement("video");
+  video.className = "gifCanvas";
+  video.muted = true;
+  video.defaultMuted = true;
+  video.playsInline = true;
+  video.setAttribute("muted", "");
+  video.setAttribute("playsinline", "");
+  video.disablePictureInPicture = true;
+  video.disableRemotePlayback = true;
+  video.preload = "none";
+  if (giphy.poster) video.poster = giphy.poster;
+  video.src = giphy.mp4;
+  video.setAttribute("aria-label", "GIF");
+
+  const badge = el("div", "gifPauseBadge");
+  badge.innerHTML = GIF_BADGE_SVG;
+  badge.hidden = true;
+  wrap.appendChild(video);
+  wrap.appendChild(badge);
+
+  let loops = 0;
+  let finished = false;
+  let fellBack = false;
+
+  const tryPlay = () => {
+    if (fellBack || finished || !video.isConnected || document.hidden) return;
+    if (video.preload === "none") video.preload = "auto";
+    const p = video.play();
+    if (p && typeof p.catch === "function") {
+      p.catch((err) => {
+        if (fellBack) return;
+        if (err && err.name === "NotAllowedError") {
+          finished = true;
+          badge.hidden = false;
+        }
+      });
+    }
+  };
+
+  video.addEventListener("ended", () => {
+    if (fellBack) return;
+    loops++;
+    if (loops < GIF_LOOPS) {
+      try { video.currentTime = 0; } catch (e) {}
+      tryPlay();
+    } else {
+      finished = true;
+      badge.hidden = false;
+    }
+  });
+
+  video.addEventListener("error", () => {
+    if (fellBack || !wrap.isConnected) return;
+    fellBack = true;
+    unregisterGifCtrl(video);
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = "GIF";
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (document.getElementById("app").classList.contains("selMode")) return;
+      openLightbox(url);
+    });
+    wrap.replaceWith(img);
+    wireGifPlayback(bubble, img, url, true);
+  }, { once: true });
+
+  const inSelMode = () => document.getElementById("app").classList.contains("selMode");
+  video.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (inSelMode()) return;
+    loops = 0;
+    finished = false;
+    badge.hidden = true;
+    try { video.currentTime = 0; } catch (e2) {}
+    tryPlay();
+  });
+  video.addEventListener("dblclick", (e) => {
+    e.stopPropagation();
+    if (inSelMode()) return;
+    openLightbox(url);
+  });
+
+  registerGifCtrl(video, {
+    onVisible() { if (!finished) tryPlay(); },
+    onHidden() { try { if (!video.paused) video.pause(); } catch (e) {} },
+  });
+
+  return wrap;
 }
 
 function buildImgBubble(m, grouped) {
@@ -4753,22 +5105,29 @@ function buildImgBubble(m, grouped) {
   const wrap = el("div", "msg " + (mine ? "out" : "in") + (grouped ? " grouped" : ""));
   const bubble = el("div", "bubble imgBubble");
   applyAuthorOutline(bubble, m.from);
-  if (/(^|\.)gif($|\?)|giphy\.com|tenor\.com/i.test(m.url || "")) bubble.classList.add("gifMsg");
+  const isGif = /(^|\.)gif($|\?)|giphy\.com|tenor\.com/i.test(m.url || "");
+  if (isGif) bubble.classList.add("gifMsg");
   wrap.dataset.ts = m.ts || "";
   const sn = senderNameEl(m, mine, grouped);
   if (sn) bubble.appendChild(sn);
   if (m.replyTo) bubble.appendChild(replyQuoteEl(m.replyTo, nameColor(m.replyTo.from)));
-  const img = document.createElement("img");
-  img.src = m.url;
-  img.alt = "Image";
-  img.loading = "lazy";
-  img.addEventListener("click", (e) => {
-    e.stopPropagation();
-    if (document.getElementById("app").classList.contains("selMode")) return;
-    openLightbox(m.url);
-  });
-  bubble.appendChild(img);
-  wireGifPlayback(bubble, img, m.url, bubble.classList.contains("gifMsg"));
+  const giphy = isGif ? giphyMediaUrls(m.url) : null;
+  if (giphy) {
+    bubble.appendChild(buildGiphyVideoWrap(bubble, m.url, giphy));
+  } else {
+    const img = document.createElement("img");
+    img.src = m.url;
+    img.alt = "Image";
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (document.getElementById("app").classList.contains("selMode")) return;
+      openLightbox(m.url);
+    });
+    bubble.appendChild(img);
+    wireGifPlayback(bubble, img, m.url, isGif);
+  }
   if (m.caption) {
     const cap = el("div", "caption");
     cap.innerHTML = linkifyHtml(m.caption);
@@ -4793,8 +5152,15 @@ function addImgBubble(m) {
 
 const lightbox = document.getElementById("lightbox");
 const lbImg = document.getElementById("lbImg");
+let lbOrigUrl = "";
 function openLightbox(url) {
-  lbImg.src = url;
+  lbOrigUrl = url || "";
+  const giphy = giphyMediaUrls(url);
+  lbImg.onerror = () => {
+    lbImg.onerror = null;
+    if (lbOrigUrl && lbImg.src !== lbOrigUrl) lbImg.src = lbOrigUrl;
+  };
+  lbImg.src = (giphy && giphy.webp) ? giphy.webp : url;
   lightbox.classList.remove("hide");
   lbImg.onload = () => {
     const vw = window.innerWidth, vh = window.innerHeight;
@@ -4809,13 +5175,15 @@ function openLightbox(url) {
 }
 function closeLightbox() {
   lightbox.classList.add("hide");
+  lbImg.onerror = null;
   lbImg.src = "";
+  lbOrigUrl = "";
 }
 document.getElementById("lbBackdrop").addEventListener("click", closeLightbox);
 document.getElementById("lbImg").addEventListener("click", closeLightbox);
 document.getElementById("lbCloseBtn").addEventListener("click", closeLightbox);
 document.getElementById("lbDlBtn").addEventListener("click", () => {
-  downloadImage(lbImg.src, "image");
+  downloadImage(lbOrigUrl || lbImg.src, "image");
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !lightbox.classList.contains("hide")) closeLightbox();
@@ -7179,11 +7547,16 @@ async function openImageForSend(file) {
   if (isDesktopPointer()) capInput.focus();
 }
 
-function openGifUrlForSend(url) {
+function openGifUrlForSend(url, previewUrl) {
   if (!url) return;
   pendingGifUrl = String(url).trim().slice(0, 500);
   pendingImgBlob = null;
-  capImg.src = pendingGifUrl;
+  const giphy = giphyMediaUrls(pendingGifUrl);
+  capImg.onerror = () => {
+    capImg.onerror = null;
+    if (pendingGifUrl && capImg.src !== pendingGifUrl) capImg.src = pendingGifUrl;
+  };
+  capImg.src = previewUrl || (giphy && giphy.webp) || pendingGifUrl;
   capInput.value = "";
   captionModal.classList.remove("hide");
   if (isDesktopPointer()) capInput.focus();
@@ -7900,21 +8273,33 @@ const gifScroll = document.getElementById("gifScroll");
 const gifBtn = document.getElementById("gifBtn");
 
 const GIF_CHIPS = ["funny", "cat", "dog", "dancing", "cute", "wow", "surprised", "laughing", "applause", "party", "thinking", "sleepy"];
-
+let _gifChipsBuilt = false;
 function renderGifChips() {
-  gifChipsEl.innerHTML = "";
+  if (_gifChipsBuilt) return;
+  _gifChipsBuilt = true;
+  const frag = document.createDocumentFragment();
   for (const c of GIF_CHIPS) {
     const b = document.createElement("button");
     b.type = "button";
     b.textContent = c;
-    b.addEventListener("click", () => { gifSearchInput.value = c; runGifSearch(c); });
-    gifChipsEl.appendChild(b);
+    b.dataset.q = c;
+    frag.appendChild(b);
   }
+  gifChipsEl.replaceChildren(frag);
 }
+gifChipsEl.addEventListener("click", (e) => {
+  const b = e.target && e.target.closest ? e.target.closest("button[data-q]") : null;
+  if (!b) return;
+  const c = b.dataset.q;
+  gifSearchInput.value = c;
+  runGifSearch(c);
+});
 
 const GIPHY_API_KEY = "0LY9G7vJ6CPe7pF1rD2N5xpPiiRjDoNz";
 
 const GIF_PER_PAGE = 30;
+const GIF_QUERY_CACHE_TTL = 5 * 60 * 1000;
+const gifQueryCache = new Map();
 const GIF_BAD_WORDS = [
   /\bsex\b/i, /porn/i, /naked/i, /nude/i, /nudity/i, /boob/i, /boobie/i, /titt/i,
   /\bass\b/i, /\bbooty\b/i, /\bthong\b/i, /lingerie/i, /milf/i, /\bslut\b/i, /\bwhore\b/i,
@@ -7929,35 +8314,121 @@ function gifOk(r) {
   return !GIF_BAD_WORDS.some((re) => re.test(s));
 }
 async function gifFetchPage(query, offset) {
+  const key = query.toLowerCase() + ":" + offset;
+  const cached = gifQueryCache.get(key);
+  if (cached && (Date.now() - cached.ts) < GIF_QUERY_CACHE_TTL) {
+    return { items: cached.items, done: cached.done };
+  }
   const j = await root.superFetch("https://api.giphy.com/v1/gifs/search?api_key=" + GIPHY_API_KEY + "&q=" + encodeURIComponent(query) + "&limit=" + GIF_PER_PAGE + "&offset=" + offset + "&rating=g").then((r) => r.json());
   const raw = (j && j.data) || [];
   const total = (j && j.pagination && j.pagination.total_count) || 0;
   const items = [];
-  for (const r of raw) if (gifOk(r)) items.push({ url: r.images.downsized.url, thumb: (r.images.preview_gif && r.images.preview_gif.url) || r.images.fixed_height_small.url });
+  for (const r of raw) {
+    if (!gifOk(r)) continue;
+    const im = r.images;
+    const url = (im.downsized && im.downsized.url) || (im.original && im.original.url) || "";
+    if (!url) continue;
+    const thumb = (im.preview_webp && im.preview_webp.url)
+      || (im.fixed_width_downsampled && im.fixed_width_downsampled.webp)
+      || (im.fixed_height_small && im.fixed_height_small.webp)
+      || (im.preview_gif && im.preview_gif.url)
+      || (im.fixed_height_small && im.fixed_height_small.url)
+      || url;
+    const still = (im.fixed_width_small_still && im.fixed_width_small_still.url)
+      || (im.fixed_height_small_still && im.fixed_height_small_still.url)
+      || (im.downsized_still && im.downsized_still.url)
+      || "";
+    const preview = (im.fixed_height && im.fixed_height.webp)
+      || (im.original && im.original.webp)
+      || thumb;
+    items.push({ url, thumb, still, preview });
+  }
   const done = raw.length === 0 || (total > 0 && offset + raw.length >= total);
+  gifQueryCache.set(key, { items, done, ts: Date.now() });
+  while (gifQueryCache.size > 40) gifQueryCache.delete(gifQueryCache.keys().next().value);
   return { items, done };
 }
 let gifSearchBusy = false;
 let gifSearchSeq = 0;
 let gifState = { q: "", offset: 0, done: false, waiting: false };
+
+const gifPickerObs = typeof IntersectionObserver !== "undefined"
+  ? new IntersectionObserver((entries) => {
+      const panelClosed = gifPanel.classList.contains("hide");
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const img = entry.target.firstElementChild;
+        if (!img) continue;
+        const thumb = img.dataset.thumb;
+        const still = img.dataset.still;
+        if (!panelClosed && entry.isIntersecting) {
+          if (thumb && img.getAttribute("src") !== thumb) img.src = thumb;
+        } else if (still && img.getAttribute("src")) {
+          if (img.getAttribute("src") !== still) img.src = still;
+        }
+      }
+    }, { root: gifScroll, rootMargin: "180px 0px", threshold: 0.01 })
+  : null;
+
+function setGifGridAnimationsActive(active) {
+  const cells = gifGridEl.children;
+  const scrollTop = gifScroll.scrollTop;
+  const viewTop = scrollTop - 180;
+  const viewBottom = scrollTop + gifScroll.clientHeight + 180;
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    if (!cell.classList || !cell.classList.contains("gifCell")) continue;
+    const img = cell.firstElementChild;
+    if (!img) continue;
+    const thumb = img.dataset.thumb;
+    const still = img.dataset.still;
+    if (active) {
+      const top = cell.offsetTop;
+      const bot = top + cell.offsetHeight;
+      if (bot >= viewTop && top <= viewBottom) {
+        if (thumb && img.getAttribute("src") !== thumb) img.src = thumb;
+      }
+    } else if (still && img.getAttribute("src")) {
+      if (img.getAttribute("src") !== still) img.src = still;
+    }
+  }
+}
+
 function gifCellEl(r) {
   const cell = document.createElement("button");
   cell.type = "button";
   cell.className = "gifCell";
+  cell.dataset.url = r.url;
+  if (r.preview) cell.dataset.preview = r.preview;
   const img = document.createElement("img");
   img.loading = "lazy";
-  img.src = r.thumb;
+  img.decoding = "async";
+  img.dataset.thumb = r.thumb;
+  if (r.still) img.dataset.still = r.still;
+  if (!gifPickerObs) img.src = r.thumb;
   img.alt = "GIF";
-  img.onerror = () => { img.remove(); };
+  img.onerror = () => {
+    if (img.dataset.thumb && img.getAttribute("src") !== img.dataset.thumb) {
+      img.src = img.dataset.thumb;
+      return;
+    }
+    img.remove();
+  };
   cell.appendChild(img);
-  cell.addEventListener("click", () => {
-    closeGifPanel();
-    openGifUrlForSend(r.url);
-  });
+  if (gifPickerObs) gifPickerObs.observe(cell);
   return cell;
 }
+gifGridEl.addEventListener("click", (e) => {
+  const cell = e.target && e.target.closest ? e.target.closest(".gifCell[data-url]") : null;
+  if (!cell) return;
+  closeGifPanel();
+  openGifUrlForSend(cell.dataset.url, cell.dataset.preview || "");
+});
+
 function appendGifItems(items) {
-  for (const r of items) gifGridEl.appendChild(gifCellEl(r));
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < items.length; i++) frag.appendChild(gifCellEl(items[i]));
+  gifGridEl.appendChild(frag);
 }
 function showGifLoader(show) {
   const l = gifGridEl.querySelector(".gifLoad.more");
@@ -7997,13 +8468,18 @@ async function runGifSearch(query) {
   const seq = ++gifSearchSeq;
   gifSearchBusy = true;
   gifState = { q, offset: 0, done: false, waiting: false };
-  gifGridEl.innerHTML = "<div class='gifLoad'><span class='miniSpinner'></span> Loading…</div>";
+  const cached = gifQueryCache.get(q.toLowerCase() + ":0");
+  if (!cached || (Date.now() - cached.ts) >= GIF_QUERY_CACHE_TTL) {
+    gifGridEl.innerHTML = "<div class='gifLoad'><span class='miniSpinner'></span> Loading…</div>";
+  }
   try {
     const { items, done } = await gifFetchPage(q, 0);
     if (seq !== gifSearchSeq) return;
     gifState.offset = GIF_PER_PAGE;
     gifState.done = done;
+    if (gifPickerObs) gifPickerObs.disconnect();
     gifGridEl.innerHTML = "";
+    gifScroll.scrollTop = 0;
     if (!items.length) {
       if (done) gifGridEl.appendChild(el("div", "gifLoad", "No GIFs found — try another search."));
       else { gifSearchBusy = false; gifLoadMore(); }
@@ -8019,7 +8495,14 @@ async function runGifSearch(query) {
     if (seq === gifSearchSeq) gifSearchBusy = false;
   }
 }
-gifScroll.addEventListener("scroll", checkGifScroll);
+let _gifScrollRaf = 0;
+gifScroll.addEventListener("scroll", () => {
+  if (_gifScrollRaf) return;
+  _gifScrollRaf = requestAnimationFrame(() => {
+    _gifScrollRaf = 0;
+    checkGifScroll();
+  });
+}, { passive: true });
 
 function openGifPanel() {
   if (!gifPanel.classList.contains("hide")) return;
@@ -8029,6 +8512,7 @@ function openGifPanel() {
   gifBtn.classList.add("active");
   renderGifChips();
   if (!gifGridEl.children.length) runGifSearch("funny");
+  else requestAnimationFrame(() => setGifGridAnimationsActive(true));
   if (document.activeElement === msgInput) msgInput.blur();
   if (isDesktopPointer()) setTimeout(() => gifSearchInput.focus(), 60);
   syncPanelRaise();
@@ -8038,6 +8522,7 @@ function closeGifPanel() {
   if (gifPanel.classList.contains("hide")) return;
   gifPanel.classList.add("hide");
   gifBtn.classList.remove("active");
+  setGifGridAnimationsActive(false);
   syncPanelRaise();
 }
 function toggleGifPanel() {
