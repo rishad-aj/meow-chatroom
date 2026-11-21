@@ -4621,7 +4621,7 @@ const GIF_MAX_DIM = 480;
 const GIF_CACHE_MAX = 8;
 const GIF_BITMAP_MAX_FRAMES = 120;
 const GIF_BITMAP_MAX_PIXELS = 18000000;
-const GIF_BADGE_SVG = `<svg viewBox="0 0 46 46" width="46" height="46" xmlns="http://www.w3.org/2000/svg"><circle cx="23" cy="23" r="23" fill="rgba(232,232,236,0.78)"/><text x="23" y="27" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="11" font-weight="800" letter-spacing="0.5" fill="#5b5b60">GIF</text></svg>`;
+const GIF_BADGE_SVG = `<svg viewBox="0 0 46 46" width="46" height="46" xmlns="http://www.w3.org/2000/svg"><circle cx="23" cy="23" r="23" fill="rgba(232,232,236,0.78)"/><text x="23" y="27" text-anchor="middle" font-family="Inter,sans-serif" font-size="11" font-weight="700" letter-spacing="0.5" fill="#5b5b60">GIF</text></svg>`;
 const gifDecodeCache = new Map();
 const gifActiveCtrls = new Set();
 
