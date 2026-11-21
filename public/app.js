@@ -228,7 +228,6 @@ const emojiBtn = document.getElementById("emojiBtn");
 const avatar = document.getElementById("avatar");
 const chatTitle = document.getElementById("chatTitle");
 const titleEditBtn = document.getElementById("titleEditBtn");
-const adminEyeBtn = null; // removed: view-as eye dropped per privacy terms
 const titleModal = document.getElementById("titleModal");
 const titleInput = document.getElementById("titleInput");
 const titleOkBtn = document.getElementById("titleOkBtn");
@@ -1156,10 +1155,6 @@ function msgContainers() {
   for (const h of dmDom.values()) list.push(h);
   return list;
 }
-function dmHost(peer) {
-  if (convo.mode === "dm" && convo.peer === peer) return messagesEl;
-  return dmDom.get(peer) || null;
-}
 
 function fmtTimeShort(ts) {
   const n = Number(ts) || 0;
@@ -2029,12 +2024,10 @@ const DELNOTE_SVG = '<svg fill="currentColor" viewBox="0 0 1920 1920" xmlns="htt
 const REPLY_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19l-7-7 7-7M2 12h13a7 7 0 0 1 7 7v1"/></svg>';
 const REPLY_COUNT_SVG = '<svg viewBox="1.4 1.9 16.4 13.3" width="10" height="8" fill="currentColor" aria-hidden="true"><path d="M8.5 5.2V2.6a.6.6 0 0 0-1-.45L1.75 7.45a.7.7 0 0 0 0 1.04l5.75 5.3a.6.6 0 0 0 1-.44v-2.7c3.95 0 6.55 1.25 8.4 4.1.2.32.7.15.65-.23-.55-4.8-3.4-9.32-9.05-9.32z"/></svg>';
 const EDIT_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M13.5 6.5l3 3"/></svg>';
-const DL_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>';
 const PIN_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l1 7 3 3v2H5v-2l3-3z"/><path d="M12 16v5"/></svg>';
 const FLAG_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 21V3.5"/><path d="M5.5 3.5h11l-2.2 4.2L16.5 12H5.5"/></svg>';
 const COPY_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
 const BAN_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>';
-const EYE_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const INFO_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v.01"/><path d="M12 11.5V16"/></svg>';
 const UNBAN_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5.5-5.5"/></svg>';
 const SAVE_SVG = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5004 11.9998H5.00043M4.91577 12.2913L2.58085 19.266C2.39742 19.8139 2.3057 20.0879 2.37152 20.2566C2.42868 20.4031 2.55144 20.5142 2.70292 20.5565C2.87736 20.6052 3.14083 20.4866 3.66776 20.2495L20.3792 12.7293C20.8936 12.4979 21.1507 12.3822 21.2302 12.2214C21.2993 12.0817 21.2993 11.9179 21.2302 11.7782C21.1507 11.6174 20.8936 11.5017 20.3792 11.2703L3.66193 3.74751C3.13659 3.51111 2.87392 3.39291 2.69966 3.4414C2.54832 3.48351 2.42556 3.59429 2.36821 3.74054C2.30216 3.90893 2.3929 4.18231 2.57437 4.72906L4.91642 11.7853C4.94759 11.8792 4.96317 11.9262 4.96933 11.9742C4.97479 12.0168 4.97473 12.0599 4.96916 12.1025C4.96289 12.1506 4.94718 12.1975 4.91577 12.2913Z" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -2625,11 +2618,6 @@ const LANG_LIST = [
   ["ml", "Malayalam"], ["ta", "Tamil"]
 ];
 
-function langName(code) {
-  const f = LANG_LIST.find((x) => x[0] === code);
-  return f ? f[1] : code;
-}
-function updateTranslateItems() {}
 translateItem.addEventListener("click", (e) => {
   e.stopPropagation();
   const fromList = menuPop.classList.contains("fromList");
@@ -2745,7 +2733,6 @@ function renderTpopGrid() {
       translateLang = code;
       lsSet(langKey, code);
       renderTpopGrid();
-      updateTranslateItems();
       retranslateAll();
     });
     tpopGrid.appendChild(b);
@@ -2768,7 +2755,6 @@ tpopToggle.addEventListener("click", (e) => {
   translateOn = !translateOn;
   lsSet(translateKey, translateOn ? "on" : "off");
   renderTpopToggle();
-  updateTranslateItems();
   if (translateOn) retranslateAll();
   else restoreAllOriginal();
 });
@@ -3141,13 +3127,6 @@ function makeTog(el) {
   });
   return tog;
 }
-function transBubbleOf(msgEl) {
-  const m = msgByWrap.get(msgEl);
-  if (!m || m.t !== "chat") return null;
-  const el = msgEl.querySelector(".btext");
-  if (!el || el.dataset.tOrig !== undefined) return null;
-  return (m.text || "").trim() ? el : null;
-}
 
 function origTextForEl(el) {
   const wrap = el.closest(".msg");
@@ -3235,13 +3214,6 @@ async function translateElementsBatch(els) {
   } finally {
     for (const item of toFetch) delete item.el.dataset.tBusy;
   }
-}
-
-async function translateBatchEls(els) {
-  return translateElementsBatch(els);
-}
-async function translateLooseEls(els) {
-  return translateElementsBatch(els);
 }
 
 let translateLock = Promise.resolve();
@@ -3363,7 +3335,6 @@ function restoreAllOriginal() {
     }
   }
 }
-updateTranslateItems();
 
 /* ---------- pinned message (admin + verified) ---------- */
 let pinnedMsg = null;
@@ -5265,9 +5236,6 @@ function syncBubblesLongBatch(bubbles) {
     if (results[i] !== null) items[i].bubble.classList.toggle("is-long", results[i]);
   }
 }
-function syncBubbleLong(bubble) {
-  if (bubble) syncBubblesLongBatch([bubble]);
-}
 function syncAllBubbleLong() {
   const scope = messagesEl || document;
   syncBubblesLongBatch(scope.querySelectorAll(".msg .bubble"));
@@ -6884,12 +6852,6 @@ async function loadHistoryCore() {
   if (translateOn) translateViewport();
   // The room row in a wide layout previews the newest room message.
   refreshListView();
-}
-
-async function loadInitialHistory() {
-  if (historyLoaded) return;
-  historyLoaded = true;
-  await loadHistoryCore();
 }
 
 function reloadChatHistory() {

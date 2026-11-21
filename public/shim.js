@@ -1,6 +1,6 @@
 /* Chat Room - Vercel/Supabase compatibility shim.
    Provides the same `window.root` API the UI code was written against:
-   root.profanity / root.kv / root.superFetch / root.uploadPlugin / root.ai / root.createServerSocket
+   root.profanity / root.kv / root.superFetch / root.uploadPlugin / root.createServerSocket
    Realtime transport: Supabase Realtime (broadcast + presence).
    History/media: the app's own Supabase mirror (messages table) - unchanged.
    Translation: Google Translate via /api/translate (no key needed). */
@@ -175,58 +175,6 @@ function metaSet(key, value) {
     return rest("room_meta?key=eq." + encodeURIComponent(key), "PATCH", { value: value }).then(function (r2) { return r2.ok; }).catch(function () { return false; });
   }).catch(function () { return false; });
 }
-function mapRowToMsg(row) {
-  var base = { id: "sb-" + row.id, from: row.sender, ts: Number(row.ts) || 0, flagged: !!row.flagged };
-  if (row.reply_to) {
-    var rawRp = String(row.reply_to);
-    if (!/^\s*\{/.test(rawRp)) {
-      base.replyTo = { id: rawRp };
-      var lm = rawRp.match(/^(\d{12,15})-\d+$/);
-      if (lm) base.replyTo.ts = Number(lm[1]) || 0;
-    } else {
-      try {
-        var rp = JSON.parse(rawRp);
-        if (rp && rp.rp && typeof rp.rp === "object") rp = rp.rp;
-        if (rp && typeof rp === "object" && (rp.id || rp.from || rp.text || rp.url)) {
-          base.replyTo = {
-            id: String(rp.id || ""),
-            from: String(rp.from || ""),
-            t: rp.t || "chat",
-            text: String(rp.text || ""),
-            url: String(rp.url || ""),
-            dur: Number(rp.dur) || 0,
-            size: Number(rp.size) || 0,
-            ts: Number(rp.ts) || 0
-          };
-        }
-      } catch (e) {}
-    }
-  }
-  if (row.type === "delnote") {
-    var out = { t: "delnote", id: base.id, from: base.from, ts: base.ts };
-    if (row.text && String(row.text).indexOf("__deln__") === 0) {
-      try {
-        var p = JSON.parse(String(row.text).slice(8));
-        if (p && typeof p === "object" && ("o" in p || "b" in p)) { if (p.o) out.orig = p.o; if (p.b) out.by = String(p.b); }
-        else if (p) out.orig = p;
-      } catch (e) {}
-    }
-    return out;
-  }
-  if (row.type === "chat") { base.t = "chat"; base.text = row.text || ""; return base; }
-  if (row.type === "img") { base.t = "img"; base.url = row.url || ""; if (row.text) base.caption = row.text; return base; }
-  if (row.type === "voice") { base.t = "voice"; base.url = row.url || ""; base.dur = row.dur || 0; base.size = row.size || 0; return base; }
-  return null;
-}
-function historyQuery(limit) {
-  return restJson("messages?select=id,ts,sender,type,text,url,dur,size,reply_to,flagged&type=not.like.dm.*&order=ts.desc&limit=" + (limit || 100)).then(function (rows) {
-    if (!Array.isArray(rows)) return [];
-    rows.reverse();
-    var out = [];
-    for (var i = 0; i < rows.length; i++) { var m = mapRowToMsg(rows[i]); if (m) out.push(m); }
-    return out;
-  });
-}
 function dmRowToMsg(row) {
   var meta = {};
   try { meta = JSON.parse(row.reply_to || "{}"); } catch (e) {}
@@ -256,7 +204,6 @@ function dmRowsAll() {
   });
   return _dmRowsPending;
 }
-var LANG_CODE = { english: "en", spanish: "es", french: "fr", german: "de", portuguese: "pt", italian: "it", russian: "ru", ukrainian: "uk", polish: "pl", dutch: "nl", turkish: "tr", arabic: "ar", hindi: "hi", bengali: "bn", urdu: "ur", chinese: "zh-CN", japanese: "ja", korean: "ko", vietnamese: "vi", thai: "th", indonesian: "id", malay: "ms", filipino: "tl", swahili: "sw", malayalam: "ml", tamil: "ta", hebrew: "he" };
 var TARGET_ALIAS = { zh: "zh-CN", "zh-cn": "zh-CN", fil: "tl", iw: "he" };
 function normLangCode(code) {
   var c = String(code || "en").trim().toLowerCase();
@@ -266,29 +213,6 @@ function normLangCode(code) {
 function baseLangCode(code) {
   var c = normLangCode(code).toLowerCase();
   return c.split("-")[0];
-}
-function targetOfInstruction(ins) {
-  var m = String(ins || "").match(/Translate every message into ([A-Za-z ()/-]+)\./);
-  if (m) {
-    var n = m[1].trim().toLowerCase();
-    if (LANG_CODE[n]) return LANG_CODE[n];
-    for (var k in LANG_CODE) if (k.indexOf(n) === 0 || n.indexOf(k) === 0) return LANG_CODE[k];
-  }
-  return "en";
-}
-function parseBatch(ins) {
-  var m = String(ins || "").match(/BATCH MODE: Translate all (\d+)/);
-  var n = m ? parseInt(m[1], 10) : 0;
-  var parts = String(ins || "").split("Messages to translate:");
-  var list = [];
-  if (parts.length > 1 && n > 0) {
-    var lines = parts[parts.length - 1].split("\n");
-    for (var i = 0; i < lines.length && list.length < n; i++) {
-      var lm = lines[i].match(/^\s*\d+[.)]\s*(.*)$/);
-      if (lm) list.push(lm[1]);
-    }
-  }
-  return { n: n, list: list };
 }
 function googleDirect(texts, target) {
   var tg = normLangCode(target);
@@ -347,26 +271,6 @@ function translateTexts(texts, target) {
     return googleDirect(list, tg);
   }).catch(function () {
     return googleDirect(list, tg);
-  });
-}
-function aiTranslate(opts) {
-  var ins = (opts && opts.instruction) || "";
-  var target = targetOfInstruction(ins);
-  var b = parseBatch(ins);
-  var texts, batch;
-  if (b.n > 0 && b.list.length) { texts = b.list; batch = true; }
-  else {
-    var sp = String(ins).split("Translate this:");
-    texts = [sp.length > 1 ? sp[sp.length - 1].trim() : String(ins).trim()];
-    batch = false;
-  }
-  return translateTexts(texts, target).then(function (res) {
-    var arr = (res && res.translations) || texts;
-    if (batch) {
-      var lines = arr.map(function (t, i) { return (i + 1) + ". " + t; });
-      return { text: lines.join("\n") };
-    }
-    return { text: arr[0] || texts[0] };
   });
 }
 function kvStore(prefix) {
@@ -994,12 +898,8 @@ SupaSocket.prototype._dmSend = function (m) {
   self._inboxSend(to, a);
   if (to !== self._myName) self._inboxSend(self._myName, b);
 };
-function isVerifiedName(n, verified) { return Array.isArray(verified) && verified.indexOf(n) !== -1; }
 SupaSocket.prototype.rpc = {};
 SupaSocket.prototype.rpc.reportLoc = function () { return Promise.resolve("ok"); };
-SupaSocket.prototype.rpc.getHistory = function () {
-  return historyQuery(100).then(function (rows) { return JSON.stringify(rows); });
-};
 SupaSocket.prototype.rpc.getBanned = function () {
   return metaGet("bans", []).then(function (b) { return JSON.stringify((Array.isArray(b) ? b : []).map(function (x) { return x.name; })); });
 };
@@ -1251,11 +1151,6 @@ SupaSocket.prototype.rpc.clearAll = function () {
   self._broad({ t: "clear", ts: Date.now() });
   return Promise.resolve("ok");
 };
-SupaSocket.prototype.rpc.clearState = function () {
-  var self = this;
-  if (self._myName !== ADMIN_NAME) return Promise.resolve("admin only");
-  return Promise.resolve("ok");
-};
 SupaSocket.prototype.rpc.banUser = function (data) {
   var self = this;
   return metaGet("verified", []).then(function (v) {
@@ -1479,11 +1374,6 @@ SupaSocket.prototype.rpc.unverifyUser = function (data) {
       return "ok";
     });
   });
-};
-SupaSocket.prototype.rpc.logoutProtected = function () {
-  var self = this;
-  if (self._myName !== ADMIN_NAME) return Promise.resolve("admin only");
-  return Promise.resolve(JSON.stringify({ ok: true, names: [] }));
 };
 function dmPreview(m) {
   if (!m) return "";
@@ -1714,7 +1604,6 @@ window.root = {
   kv: { identity: kvStore("identity") },
   superFetch: function (url, opts) { return fetch(url, opts); },
   uploadPlugin: uploadBlob,
-  ai: aiTranslate,
   translateTexts: translateTexts,
   createServerSocket: function () { return new SupaSocket(); }
 };
