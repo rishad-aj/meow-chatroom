@@ -414,23 +414,51 @@ function SupaSocket() {
   self._room = null;
   self._rxCache = null;
   self._presenceSynced = false;
+  self._presenceKey = "sock-" + Math.random().toString(36).slice(2) + "-" + Date.now().toString(36);
+  self._presenceReadyResolve = null;
+  self._presenceReady = new Promise(function (res) { self._presenceReadyResolve = res; });
   self._leaveTimers = {};
   self._init();
 }
 SupaSocket.prototype.addEventListener = function (t, l, o) { return this._et.addEventListener(t, l, o); };
 SupaSocket.prototype.removeEventListener = function (t, l, o) { return this._et.removeEventListener(t, l, o); };
 SupaSocket.prototype.dispatchEvent = function (e) { return this._et.dispatchEvent(e); };
+SupaSocket.prototype._normName = function (nm) {
+  return String(nm || "").trim().toLowerCase();
+};
+SupaSocket.prototype._otherSessionsCount = function (name, excludeKey) {
+  var target = this._normName(name);
+  if (!target) return 0;
+  var count = 0;
+  try {
+    var st = this._room ? this._room.presenceState() : {};
+    for (var k in st) {
+      if (excludeKey && k === excludeKey) continue;
+      var arr = st[k] || [];
+      for (var i = 0; i < arr.length; i++) {
+        var n = arr[i] && arr[i].name;
+        if (n && arr[i].named !== false && this._normName(n) === target) {
+          count++;
+          break;
+        }
+      }
+    }
+  } catch (e) {}
+  return count;
+};
 SupaSocket.prototype._cancelLeave = function (nm) {
-  if (!nm || !this._leaveTimers || !this._leaveTimers[nm]) return;
-  try { clearTimeout(this._leaveTimers[nm]); } catch (e) {}
-  delete this._leaveTimers[nm];
+  var low = this._normName(nm);
+  if (!low || !this._leaveTimers || !this._leaveTimers[low]) return;
+  try { clearTimeout(this._leaveTimers[low]); } catch (e) {}
+  delete this._leaveTimers[low];
 };
 SupaSocket.prototype._suppressLeave = function (nm) {
-  if (!nm) return;
+  var low = this._normName(nm);
+  if (!low) return;
   this._renameCool = this._renameCool || window.__presRenameCool || {};
-  this._renameCool[nm] = Date.now();
+  this._renameCool[low] = Date.now();
   window.__presRenameCool = this._renameCool;
-  this._cancelLeave(nm);
+  this._cancelLeave(low);
 };
 SupaSocket.prototype._emit = function (obj) {
   try {
@@ -448,8 +476,49 @@ SupaSocket.prototype._emit = function (obj) {
       if (obj.ev === "read") metaInvalidate("dm_reads");
     }
     else if (obj && obj.t === "system" && obj.text) {
-      var sm = String(obj.text).trim().match(/^(.+?)\s+(left|was banned|deleted their account)$/i);
-      if (sm && sm[1]) this._suppressLeave(sm[1].trim());
+      var stxt = String(obj.text).trim();
+      var jm = !obj.fake && stxt.match(/^(.+?)\s+joined$/i);
+      if (jm && jm[1]) {
+        var jName = (obj.joinName || jm[1]).trim();
+        var jLow = this._normName(jName);
+        var jKey = obj.joinKey || "";
+        this._cancelLeave(jLow);
+        // If this user already has another active tab/browser/device online,
+        // or was already tracked under a different session key without leaving,
+        // suppress the duplicate "joined" capsule.
+        if (this._presenceSynced && this._otherSessionsCount(jName, jKey) > 0) return;
+        var stableMap = this._stable || window.__presStable || {};
+        var stEntry = stableMap[jLow];
+        if (stEntry && stEntry.keys && jKey) {
+          for (var sk in stEntry.keys) {
+            if (sk !== jKey) return;
+          }
+        }
+        this._joinCool = this._joinCool || window.__presJoinCool || {};
+        var jNow = Date.now();
+        if (this._joinCool[jLow] && (jNow - this._joinCool[jLow]) < 15000) return;
+        this._joinCool[jLow] = jNow;
+        window.__presJoinCool = this._joinCool;
+      } else {
+        var lm = !obj.fake && stxt.match(/^(.+?)\s+left$/i);
+        if (lm && lm[1]) {
+          var lName = lm[1].trim();
+          var lLow = this._normName(lName);
+          // Never show "left" if another tab/browser/device for this user is still online.
+          if (this._presenceSynced && this._otherSessionsCount(lName) > 0) return;
+          if (this._joinCool && this._joinCool[lLow]) delete this._joinCool[lLow];
+          if (window.__presJoinCool && window.__presJoinCool[lLow]) delete window.__presJoinCool[lLow];
+          this._suppressLeave(lName);
+        } else {
+          var sm = stxt.match(/^(.+?)\s+(was banned|deleted their account)$/i);
+          if (sm && sm[1]) {
+            var sLow = this._normName(sm[1]);
+            if (this._joinCool && this._joinCool[sLow]) delete this._joinCool[sLow];
+            if (window.__presJoinCool && window.__presJoinCool[sLow]) delete window.__presJoinCool[sLow];
+            this._suppressLeave(sm[1].trim());
+          }
+        }
+      }
     }
   } catch (e) {}
   var ev;
@@ -468,11 +537,15 @@ SupaSocket.prototype._init = function () {
   configReady.then(function () {
   var chan;
   try {
-    chan = sbClient().channel("chat-room-v1", { config: { broadcast: { self: true }, presence: { key: "sock-" + Math.random().toString(36).slice(2) } } });
+    chan = sbClient().channel("chat-room-v1", { config: { broadcast: { self: true }, presence: { key: self._presenceKey } } });
   } catch (e) { self._fail(e); return; }
   self._room = chan;
   chan.on("broadcast", { event: "msg" }, function (p) { if (p && p.payload) self._emit(p.payload); });
-  chan.on("presence", { event: "sync" }, function () { self._presenceSynced = true; self._presence(); });
+  chan.on("presence", { event: "sync" }, function () {
+    self._presenceSynced = true;
+    if (self._presenceReadyResolve) { self._presenceReadyResolve(true); self._presenceReadyResolve = null; }
+    self._presence();
+  });
   chan.subscribe(function (status) {
     if (status === "SUBSCRIBED") {
       self.readyState = 1;
@@ -480,6 +553,9 @@ SupaSocket.prototype._init = function () {
       if (self._openResolve) self._openResolve(true);
       self.dispatchEvent(new Event("open"));
       self._presence();
+      setTimeout(function () {
+        if (self._presenceReadyResolve) { self._presenceReadyResolve(false); self._presenceReadyResolve = null; }
+      }, 1500);
     } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
       if (self.readyState === 0) self._fail(new Error(status));
       else { self.readyState = 3; var ev = new Event("close"); ev.code = 1006; self.dispatchEvent(ev); }
@@ -490,12 +566,16 @@ SupaSocket.prototype._init = function () {
 SupaSocket.prototype._presenceNames = function () {
   var out = [], seen = {};
   try {
-    var st = this._room.presenceState();
+    var st = this._room ? this._room.presenceState() : {};
     for (var k in st) {
       var arr = st[k] || [];
       for (var i = 0; i < arr.length; i++) {
         var n = arr[i] && arr[i].name;
-        if (n && arr[i].named !== false && !seen[n]) { seen[n] = 1; out.push({ name: n, uid: arr[i].uid || "" }); }
+        if (!n || arr[i].named === false) continue;
+        var low = this._normName(n);
+        if (!low || seen[low]) continue;
+        seen[low] = 1;
+        out.push({ name: n, uid: arr[i].uid || "" });
       }
     }
   } catch (e) {}
@@ -503,11 +583,8 @@ SupaSocket.prototype._presenceNames = function () {
 };
 // Join notices come from the server broadcast, but Supabase presence has no
 // server-side leave hook - so a leave is synthesized locally: a named user
-// that was present and vanishes gets an "X left" notice. Our own handover gap
-// (old session gone, new one not yet named) is never a real leave, and repeat
-// leaves inside the cooldown are suppressed so a flapping connection doesn't
-// spam the log. Counters survive across socket instances, so someone who
-// leaves right after we rejoin still gets their notice.
+// that was present and vanishes gets an "X left" notice ONLY once ALL of
+// their active tabs, browsers, and devices have disconnected.
 SupaSocket.prototype._presence = function () {
   var self = this;
   try {
@@ -516,53 +593,87 @@ SupaSocket.prototype._presence = function () {
     // presence sync; otherwise reconnects see an empty presenceState() and
     // falsely emit "X left" for every user carried over in __presStable.
     if (self._presenceSynced) {
-      var cur = {}, i;
-      for (i = 0; i < list.length; i++) cur[list[i].name] = 1;
+      var cur = {}, curKeys = {}, i;
+      try {
+        var stRaw = self._room ? self._room.presenceState() : {};
+        for (var pk in stRaw) {
+          var parr = stRaw[pk] || [];
+          for (var pi = 0; pi < parr.length; pi++) {
+            var pn = parr[pi] && parr[pi].name;
+            if (!pn || parr[pi].named === false) continue;
+            var plow = self._normName(pn);
+            if (!plow) continue;
+            if (!cur[plow]) cur[plow] = pn;
+            if (!curKeys[plow]) curKeys[plow] = {};
+            curKeys[plow][pk] = 1;
+          }
+        }
+      } catch (e0) {
+        for (i = 0; i < list.length; i++) {
+          var fl = self._normName(list[i].name);
+          if (fl) cur[fl] = list[i].name;
+        }
+      }
       self._stable = self._stable || window.__presStable || {};
       self._renameCool = self._renameCool || window.__presRenameCool || {};
       self._leftCool = self._leftCool || window.__presLeftCool || {};
       self._leaveTimers = self._leaveTimers || {};
-      var now = Date.now(), nm;
-      for (nm in cur) {
-        self._stable[nm] = (self._stable[nm] || 0) + 1;
-        self._cancelLeave(nm);
+      var now = Date.now(), low;
+      for (low in cur) {
+        var prevSt = self._stable[low];
+        var nextKeys = (prevSt && prevSt.keys) ? prevSt.keys : {};
+        if (curKeys[low]) {
+          for (var ck in curKeys[low]) nextKeys[ck] = 1;
+        }
+        self._stable[low] = {
+          name: cur[low],
+          count: ((prevSt && typeof prevSt === "object" ? prevSt.count : Number(prevSt)) || 0) + 1,
+          keys: nextKeys
+        };
+        self._cancelLeave(low);
       }
-      for (nm in self._stable) {
-        if (!cur[nm]) {
-          if (nm === self._myName || (self._expectName && nm === self._expectName)) {
-            self._cancelLeave(nm);
+      var myLow = self._normName(self._myName);
+      var expLow = self._normName(self._expectName);
+      for (low in self._stable) {
+        if (!cur[low]) {
+          var entry = self._stable[low];
+          var whoName = (entry && typeof entry === "object" && entry.name) ? entry.name : low;
+          if (low === myLow || (expLow && low === expLow)) {
+            self._cancelLeave(low);
             continue;
           }
-          if (self._renameCool[nm] && now - self._renameCool[nm] <= 25000) {
-            self._cancelLeave(nm);
-            delete self._stable[nm];
+          if (self._renameCool[low] && now - self._renameCool[low] <= 25000) {
+            self._cancelLeave(low);
+            delete self._stable[low];
             continue;
           }
-          if (!self._leaveTimers[nm]) {
-            (function (who) {
-              self._leaveTimers[who] = setTimeout(function () {
-                delete self._leaveTimers[who];
+          if (!self._leaveTimers[low]) {
+            (function (whoLow, displayWho) {
+              self._leaveTimers[whoLow] = setTimeout(function () {
+                delete self._leaveTimers[whoLow];
                 if (self.readyState !== 1) return;
-                var latest = self._presenceNames();
-                for (var li = 0; li < latest.length; li++) {
-                  if (latest[li].name === who) return;
-                }
-                if (who === self._myName || (self._expectName && who === self._expectName)) return;
+                // Abort if any tab, browser, or device for this user is still online.
+                if (self._otherSessionsCount(displayWho) > 0) return;
+                var curMyLow = self._normName(self._myName);
+                var curExpLow = self._normName(self._expectName);
+                if (whoLow === curMyLow || (curExpLow && whoLow === curExpLow)) return;
                 var tsNow = Date.now();
                 var rCool = self._renameCool || window.__presRenameCool || {};
                 var lCool = self._leftCool || window.__presLeftCool || {};
-                if (self._stable && self._stable[who] >= 1 &&
-                    (!rCool[who] || tsNow - rCool[who] > 25000) &&
-                    (!lCool[who] || tsNow - lCool[who] > 25000)) {
-                  lCool[who] = tsNow;
+                var stRec = self._stable && self._stable[whoLow];
+                var stCount = stRec ? (typeof stRec === "object" ? stRec.count : Number(stRec)) : 0;
+                if (stCount >= 1 &&
+                    (!rCool[whoLow] || tsNow - rCool[whoLow] > 25000) &&
+                    (!lCool[whoLow] || tsNow - lCool[whoLow] > 25000)) {
+                  lCool[whoLow] = tsNow;
                   self._leftCool = lCool;
                   window.__presLeftCool = lCool;
-                  self._emit({ t: "system", text: who + " left", ts: tsNow });
+                  self._emit({ t: "system", text: displayWho + " left", ts: tsNow });
                 }
-                if (self._stable) delete self._stable[who];
+                if (self._stable) delete self._stable[whoLow];
                 window.__presStable = self._stable;
               }, 3500);
-            })(nm);
+            })(low, whoName);
           }
         }
       }
@@ -689,7 +800,7 @@ SupaSocket.prototype.send = function (str) {
       if (m.presence === "join") { if (nm && fake.indexOf(nm) === -1) fake.push(nm); }
       else if (m.presence === "left") { fake = fake.filter(function (x) { return x !== nm; }); }
       metaSet("fake", fake).then(function () {
-        self._broad({ t: "system", text: txt, ts: now });
+        self._broad({ t: "system", text: txt, fake: true, ts: now });
         self._presence();
       });
     });
@@ -930,9 +1041,15 @@ SupaSocket.prototype.rpc.getOnline = function () {
   var self = this;
   return metaGet("fake", []).then(function (fake) {
     var names = self._presenceNames(), seen = {}, list = [];
-    for (var i = 0; i < names.length; i++) { if (!seen[names[i].name]) { seen[names[i].name] = 1; list.push({ name: names[i].name, count: 1 }); } }
+    for (var i = 0; i < names.length; i++) {
+      var low = self._normName(names[i].name);
+      if (low && !seen[low]) { seen[low] = 1; list.push({ name: names[i].name, count: 1 }); }
+    }
     fake = Array.isArray(fake) ? fake : [];
-    for (var j = 0; j < fake.length; j++) if (!seen[fake[j]]) list.push({ name: fake[j], count: 1 });
+    for (var j = 0; j < fake.length; j++) {
+      var flow = self._normName(fake[j]);
+      if (flow && !seen[flow]) { seen[flow] = 1; list.push({ name: fake[j], count: 1 }); }
+    }
     return JSON.stringify(list);
   });
 };
@@ -981,14 +1098,19 @@ SupaSocket.prototype.rpc.setName = function (data) {
         });
       }
     } catch (e) {}
-    var alreadyOnline = self._presenceNames().some(function (x) {
-      return x && x.name && x.name.toLowerCase() === finalName.toLowerCase();
-    });
+    var alreadyOnline = self._otherSessionsCount(finalName, self._presenceKey) > 0;
     self._cancelLeave(finalName);
     try { self._room.track({ name: finalName, uid: self._myUid || "", named: true }); } catch (e) {}
     if (first) {
       if (!self._quietJoin && !alreadyOnline) {
-        self._broad({ t: "system", text: finalName + " joined", ts: Date.now() });
+        var announceJoin = function () {
+          if (self.readyState !== 1) return;
+          if (!self._myName || self._normName(self._myName) !== self._normName(finalName)) return;
+          if (self._otherSessionsCount(finalName, self._presenceKey) > 0) return;
+          self._broad({ t: "system", text: finalName + " joined", joinKey: self._presenceKey, joinName: finalName, ts: Date.now() });
+        };
+        if (self._presenceSynced) announceJoin();
+        else self._presenceReady.then(announceJoin);
       }
     } else if (old && old !== finalName) {
       self._suppressLeave(old);
@@ -1042,13 +1164,15 @@ SupaSocket.prototype.rpc.setName = function (data) {
       });
     }).catch(function () { return "wrong_password"; });
   }
-  function joinChecks(nm, display) {
+  function joinChecks(nm, display, authed) {
     return Promise.all([metaGet("bans", []), metaGet("verified", [])]).then(function (r) {
       var bans = Array.isArray(r[0]) ? r[0] : [];
       for (var i = 0; i < bans.length; i++) if (bans[i] && String(bans[i].name).toLowerCase() === nm.toLowerCase()) return "banned";
-      var others = self._presenceNames().filter(function (x) { return x.name.toLowerCase() === nm.toLowerCase(); });
-      for (var j = 0; j < others.length; j++) {
-        if (!(self._myUid && others[j].uid && others[j].uid === self._myUid)) return "name_taken";
+      if (!authed) {
+        var others = self._presenceNames().filter(function (x) { return x.name.toLowerCase() === nm.toLowerCase(); });
+        for (var j = 0; j < others.length; j++) {
+          if (!(self._myUid && others[j].uid && others[j].uid === self._myUid)) return "name_taken";
+        }
       }
       return finish(display || nm);
     });
@@ -1062,7 +1186,7 @@ SupaSocket.prototype.rpc.setName = function (data) {
         return acctCreate(name, name, h).then(function (made) {
           if (!made) return "password_required";
           attemptsClear(name);
-          return joinChecks(name, name);
+          return joinChecks(name, name, true);
         });
       });
     }
@@ -1074,7 +1198,7 @@ SupaSocket.prototype.rpc.setName = function (data) {
         return acctSetHash(name, h).then(function (okc) {
           if (!okc) return "db_error";
           attemptsClear(name);
-          return joinChecks(name, disp);
+          return joinChecks(name, disp, true);
         });
       });
     }
@@ -1083,7 +1207,7 @@ SupaSocket.prototype.rpc.setName = function (data) {
     return hashPw(pass, name).then(function (h) {
       if (h !== acct.pass_hash) return "wrong_password";
       attemptsClear(name);
-      return joinChecks(name, disp);
+      return joinChecks(name, disp, true);
     });
   }).catch(function () { return "db_error"; });
 };
