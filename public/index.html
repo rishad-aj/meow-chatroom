@@ -17,15 +17,24 @@
 <link rel="dns-prefetch" href="https://media2.giphy.com">
 <link rel="dns-prefetch" href="https://media3.giphy.com">
 <link rel="dns-prefetch" href="https://media4.giphy.com">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="modulepreload" href="./shim.js">
 <link rel="modulepreload" href="./app.js">
 <link rel="manifest" href="https://user.uploads.dev/file/25455502383c588f70e0be7cce93247d.json">
 <link rel="apple-touch-icon" href="https://user.uploads.dev/file/b6802c73e0b623361cc1949c6b29a267.png">
 <style>
+  :root {
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body {
-    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     background: #92c17f;
     color: #111;
     text-align: left;
@@ -33,6 +42,7 @@
     height: 100dvh;
     overflow: hidden;
   }
+  button, input, textarea, select { font-family: var(--font-sans); }
   .hide { display: none !important; }
   /* ---------- no-zoom guards ---------- */
   #app, #app * { touch-action: manipulation; }
@@ -1446,7 +1456,7 @@
   .onlineUser .olTag { margin-left: auto; font-size: 11px; color: #d4a017; font-weight: 700; flex-shrink: 0; }
   .onlineUser .olMain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .onlineUser .olTop { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .onlineUser .olNet { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #78909c; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .onlineUser .olNet { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #78909c; font-family: var(--font-mono); }
   .onlineUser .olBadge { font-family: inherit; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 20px; letter-spacing: .3px; }
   .onlineUser .olBadge.vpn { background: #fde8e8; color: #c62828; }
   .onlineUser .olCode { opacity: .85; }
@@ -2131,11 +2141,11 @@
   #fmtBar .fmtBtn:hover { background: rgba(38, 120, 182, 0.12); color: #2678b6; }
   #fmtBar .fmtBtn:active { background: rgba(38, 120, 182, 0.2); }
   #fmtBar .fmtBtn.b { font-weight: 700; }
-  #fmtBar .fmtBtn.i { font-style: italic; font-family: Georgia, "Times New Roman", serif; font-size: 17px; }
+  #fmtBar .fmtBtn.i { font-style: italic; font-family: inherit; font-size: 16px; }
   #fmtBar .fmtBtn.s { text-decoration: line-through; text-decoration-thickness: 1.5px; }
-  #fmtBar .fmtBtn.c { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  #fmtBar .fmtBtn.c { font-family: var(--font-mono); font-size: 13px; }
   .btext code, .caption code, .rqText code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 0.85em;
     background: #eef1f4;
     border-radius: 4px;
