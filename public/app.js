@@ -537,32 +537,40 @@ function scrollBottom(force) {
 const roomScrollCtn = document.getElementById("scrollCtn");
 let scrollCtnEl = roomScrollCtn;
 const scrollDownBtn = document.getElementById("scrollDownBtn");
+let _scrollBtnHidden = null;
 function updateScrollBtn() {
-  scrollDownBtn.classList.toggle("hide", scrollCtnEl.scrollHeight - scrollCtnEl.scrollTop - scrollCtnEl.clientHeight < 60);
-}
-roomScrollCtn.addEventListener("scroll", () => {
-  if (convo.mode !== "room") return;
-  updateScrollBtn();
-  const nb = isNearBottom();
-  if (!nb) {
-    userScrolledUp = true;
-    syncUnreadChipArrow();
-  } else if (document.visibilityState !== "hidden" && Date.now() >= bannerJumpUntil) {
-    userScrolledUp = false;
-    if (unreadCount || roomMessagesEl.querySelector(".unreadBanner") || !unreadChipBtn.classList.contains("hide")) {
-      clearUnreadState();
-    }
+  const hide = scrollCtnEl.scrollHeight - scrollCtnEl.scrollTop - scrollCtnEl.clientHeight < 60;
+  if (_scrollBtnHidden !== hide) {
+    _scrollBtnHidden = hide;
+    scrollDownBtn.classList.toggle("hide", hide);
   }
-});
-let transDebounce = null;
+}
+let _roomScrollRaf = 0;
 roomScrollCtn.addEventListener("scroll", () => {
   if (convo.mode !== "room") return;
-  maybeLoadOlder();
+  if (_roomScrollRaf) return;
+  _roomScrollRaf = requestAnimationFrame(() => {
+    _roomScrollRaf = 0;
+    if (convo.mode !== "room") return;
+    updateScrollBtn();
+    const nb = isNearBottom();
+    if (!nb) {
+      userScrolledUp = true;
+      syncUnreadChipArrow();
+    } else if (document.visibilityState !== "hidden" && Date.now() >= bannerJumpUntil) {
+      userScrolledUp = false;
+      if (unreadCount || roomMessagesEl.querySelector(".unreadBanner") || !unreadChipBtn.classList.contains("hide")) {
+        clearUnreadState();
+      }
+    }
+    maybeLoadOlder();
+  });
   if (translateOn) {
     clearTimeout(transDebounce);
     transDebounce = setTimeout(() => translateViewport(), 220);
   }
-});
+}, { passive: true });
+let transDebounce = null;
 function animateScrollTo(targetTop) {
   const start = scrollCtnEl.scrollTop;
   const delta = targetTop - start;
@@ -910,7 +918,15 @@ function canDm(name) { return !!name && name !== myName && (name === "admin" || 
 
 // Every place that lists conversations, so the "is the list on screen" test
 // lives in exactly one place.
-function refreshListView() { if (peopleOpen || isDesk()) renderPeopleList(); }
+let _listViewRaf = 0;
+function refreshListView() {
+  if (!(peopleOpen || isDesk())) return;
+  if (_listViewRaf) return;
+  _listViewRaf = requestAnimationFrame(() => {
+    _listViewRaf = 0;
+    if (peopleOpen || isDesk()) renderPeopleList();
+  });
+}
 // ...and the same for the People/private-chat screen being on screen at all.
 function setPeopleScreenVisible(v) {
   const show = !!v || isDesk();
@@ -918,7 +934,7 @@ function setPeopleScreenVisible(v) {
   appHost.classList.toggle("peopleMode", !!v && !isDesk());
 }
 
-function startPeopleTimer() { clearInterval(peopleTimer); peopleTimer = setInterval(refreshPeople, 5000); }
+function startPeopleTimer() { clearInterval(peopleTimer); peopleTimer = setInterval(refreshPeople, 12000); }
 
 /* Append target override. Building a message for a conversation that isn't on
    screen (a stashed private chat) needs the same renderers to drop it into that
@@ -1404,10 +1420,11 @@ function renderPeopleList(animateTabs) {
     requestAnimationFrame(() => syncFolderIndicator(false));
   }
 
-  peopleListEl.textContent = "";
+  const frag = document.createDocumentFragment();
   // The admin's "view as" session replaces the whole list with that person's
   // conversations, so the eye icon really does put the admin in their shoes.
   if (isAdmin() && viewAs) {
+    peopleListEl.textContent = "";
     peopleTitleEl.textContent = "Chats";
     peopleSubEl.textContent = "Viewing as " + viewAs;
     renderViewAsList();
@@ -1425,101 +1442,116 @@ function renderPeopleList(animateTabs) {
 
   if (activeFolder === "private") {
     if (!allowed) {
-      peopleListEl.appendChild(el("div", "pEmpty", myName ? "Private chat is for verified users only." : "Connecting…"));
-      return;
+      frag.appendChild(el("div", "pEmpty", myName ? "Private chat is for verified users only." : "Connecting…"));
+    } else {
+      for (const peer of chats) frag.appendChild(personRow(peer, byPeer.get(peer)));
+      for (const peer of fresh) frag.appendChild(personRow(peer, null));
+      if (!chats.length && !fresh.length) {
+        frag.appendChild(el("div", "pEmpty", q ? "No private chats match that search" : "No private chats yet.\nVerified people appear here when online."));
+      }
     }
-    for (const peer of chats) peopleListEl.appendChild(personRow(peer, byPeer.get(peer)));
-    for (const peer of fresh) peopleListEl.appendChild(personRow(peer, null));
-    if (!chats.length && !fresh.length) {
-      peopleListEl.appendChild(el("div", "pEmpty", q ? "No private chats match that search" : "No private chats yet.\nVerified people appear here when online."));
-    }
+    peopleListEl.replaceChildren(frag);
     return;
   }
 
   if (activeFolder === "room") {
     if (roomMatches) {
-      peopleListEl.appendChild(roomRow());
+      frag.appendChild(roomRow());
     } else {
-      peopleListEl.appendChild(el("div", "pEmpty", "No room matches that search"));
+      frag.appendChild(el("div", "pEmpty", "No room matches that search"));
     }
+    peopleListEl.replaceChildren(frag);
     return;
   }
 
   // Default "all" folder: pinned Room card at top, followed seamlessly by chats
   // and online verified contacts (matching the clean Telegram list rhythm).
   if (roomMatches) {
-    peopleListEl.appendChild(roomRow());
+    frag.appendChild(roomRow());
   }
   if (!allowed) {
-    if (!q) peopleListEl.appendChild(el("div", "pEmpty", myName ? "Private chats are available for verified users." : "Connecting…"));
-    else if (!roomMatches) peopleListEl.appendChild(el("div", "pEmpty", "No chats match that search"));
+    if (!q) frag.appendChild(el("div", "pEmpty", myName ? "Private chats are available for verified users." : "Connecting…"));
+    else if (!roomMatches) frag.appendChild(el("div", "pEmpty", "No chats match that search"));
+    peopleListEl.replaceChildren(frag);
     return;
   }
-  for (const peer of chats) peopleListEl.appendChild(personRow(peer, byPeer.get(peer)));
-  for (const peer of fresh) peopleListEl.appendChild(personRow(peer, null));
+  for (const peer of chats) frag.appendChild(personRow(peer, byPeer.get(peer)));
+  for (const peer of fresh) frag.appendChild(personRow(peer, null));
   // Admin-only moderation sections stay clearly separated below conversations.
   if (pending.length) {
-    peopleListEl.appendChild(el("div", "pSection", "Not verified"));
-    for (const peer of pending) peopleListEl.appendChild(pendingRow(peer));
+    frag.appendChild(el("div", "pSection", "Not verified"));
+    for (const peer of pending) frag.appendChild(pendingRow(peer));
   }
   if (monitored.length) {
-    peopleListEl.appendChild(el("div", "pSection", "All private chats"));
-    for (const t of monitored) peopleListEl.appendChild(adminThreadRow(t));
+    frag.appendChild(el("div", "pSection", "All private chats"));
+    for (const t of monitored) frag.appendChild(adminThreadRow(t));
   }
   if (!roomMatches && !chats.length && !fresh.length && !pending.length && !monitored.length) {
-    peopleListEl.appendChild(el("div", "pEmpty", q ? "No chats match that search" : "No one else is here right now.\nPeople appear the moment they join."));
+    frag.appendChild(el("div", "pEmpty", q ? "No chats match that search" : "No one else is here right now.\nPeople appear the moment they join."));
   }
+  peopleListEl.replaceChildren(frag);
 }
 
+let _refreshPeopleBusy = false;
 async function refreshPeople() {
   if (!socket || socket.readyState !== 1) return;
+  if (document.hidden || _refreshPeopleBusy) return;
+  _refreshPeopleBusy = true;
   try {
-    const r = JSON.parse(await socket.rpc.getDmThreads(""));
-    if (Array.isArray(r)) {
-      dmThreads = r.filter((t) => t && t.peer);
-      const nowMs = Date.now();
-      for (const t of dmThreads) {
-        if (!canDm(t.peer)) {
-          delete dmUnreadMap[t.peer];
-          delete dmUnreadBumpAt[t.peer];
-          t.unread = 0;
-          continue;
+    const [dmRes, onRes] = await Promise.all([
+      socket.rpc.getDmThreads("").catch(() => null),
+      socket.rpc.getOnline("").catch(() => null)
+    ]);
+    try {
+      const r = dmRes ? JSON.parse(dmRes) : null;
+      if (Array.isArray(r)) {
+        dmThreads = r.filter((t) => t && t.peer);
+        const nowMs = Date.now();
+        for (const t of dmThreads) {
+          if (!canDm(t.peer)) {
+            delete dmUnreadMap[t.peer];
+            delete dmUnreadBumpAt[t.peer];
+            t.unread = 0;
+            continue;
+          }
+          const viewingThisDm = convo.mode === "dm" && convo.peer === t.peer && document.visibilityState !== "hidden" && isNearBottom();
+          let u = viewingThisDm ? 0 : Math.max(0, Number(t.unread) || 0);
+          // Preserve a just-arrived realtime DM notification while its row finishes persisting.
+          if (!viewingThisDm && dmUnreadBumpAt[t.peer] && (nowMs - dmUnreadBumpAt[t.peer]) < 6000) {
+            u = Math.max(u, Math.max(0, Number(dmUnreadMap[t.peer]) || 0));
+          }
+          if (u) dmUnreadMap[t.peer] = u; else delete dmUnreadMap[t.peer];
+          t.unread = u;
         }
-        const viewingThisDm = convo.mode === "dm" && convo.peer === t.peer && document.visibilityState !== "hidden" && isNearBottom();
-        let u = viewingThisDm ? 0 : Math.max(0, Number(t.unread) || 0);
-        // Preserve a just-arrived realtime DM notification while its row finishes persisting.
-        if (!viewingThisDm && dmUnreadBumpAt[t.peer] && (nowMs - dmUnreadBumpAt[t.peer]) < 6000) {
-          u = Math.max(u, Math.max(0, Number(dmUnreadMap[t.peer]) || 0));
+        // Drop read marks whose conversation no longer exists (deleted on the
+        // other side, wiped by a clear, or a peer who was un-verified), so a
+        // stale badge can never sit on a row with no thread behind it.
+        const live = new Set(dmThreads.filter((t) => canDm(t.peer)).map((t) => t.peer));
+        for (const k of Object.keys(dmUnreadMap)) {
+          const recentBump = dmUnreadBumpAt[k] && (nowMs - dmUnreadBumpAt[k]) < 6000;
+          if (!canDm(k) || (!live.has(k) && !recentBump)) {
+            delete dmUnreadMap[k];
+            delete dmUnreadBumpAt[k];
+          }
         }
-        if (u) dmUnreadMap[t.peer] = u; else delete dmUnreadMap[t.peer];
-        t.unread = u;
+        saveDmUnread();
+        updateBackBadge();
       }
-      // Drop read marks whose conversation no longer exists (deleted on the
-      // other side, wiped by a clear, or a peer who was un-verified), so a
-      // stale badge can never sit on a row with no thread behind it.
-      const live = new Set(dmThreads.filter((t) => canDm(t.peer)).map((t) => t.peer));
-      for (const k of Object.keys(dmUnreadMap)) {
-        const recentBump = dmUnreadBumpAt[k] && (nowMs - dmUnreadBumpAt[k]) < 6000;
-        if (!canDm(k) || (!live.has(k) && !recentBump)) {
-          delete dmUnreadMap[k];
-          delete dmUnreadBumpAt[k];
-        }
+    } catch (e) {}
+    try {
+      const o = onRes ? JSON.parse(onRes) : null;
+      if (Array.isArray(o)) {
+        onlineNames = new Set(o.filter((u) => u && u.online !== 0).map((u) => String(u.name || "")).filter(Boolean));
       }
-      saveDmUnread();
-      updateBackBadge();
-    }
-  } catch (e) {}
-  try {
-    const o = JSON.parse(await socket.rpc.getOnline(""));
-    if (Array.isArray(o)) {
-      onlineNames = new Set(o.filter((u) => u && u.online !== 0).map((u) => String(u.name || "")).filter(Boolean));
-    }
-  } catch (e) {}
-  refreshAvatarDots();
-  syncPfpsFromServer(false);
-  await refreshAdminDmThreads();
-  refreshListView();
-  if (convo.mode === "dm") applyHeader();
+    } catch (e) {}
+    refreshAvatarDots();
+    syncPfpsFromServer(false);
+    await refreshAdminDmThreads();
+    refreshListView();
+    if (convo.mode === "dm") applyHeader();
+  } finally {
+    _refreshPeopleBusy = false;
+  }
 }
 
 function openPeople() {
@@ -1603,11 +1635,25 @@ function leaveDm() {
 
 function renderDmThread(msgs) {
   msgByWrapCleanup(dmMessagesEl);
-  dmMessagesEl.textContent = "";
-  for (const m of msgs) if (m && m.t) addMessageDom(enrichReply(m));
-  if (!msgs.length) dmMessagesEl.appendChild(el("div", "pEmpty", "No messages yet \u2014 say hi."));
+  const frag = document.createDocumentFragment();
+  let prevFrom = null;
+  for (const raw of msgs) {
+    if (!raw || !raw.t) continue;
+    const m = enrichReply(raw);
+    if (m.t === "system") {
+      frag.appendChild(sysDom(m));
+      prevFrom = null;
+    } else {
+      const grouped = !!(prevFrom && m.from && prevFrom === m.from);
+      frag.appendChild(buildMessageDom(m, grouped));
+      prevFrom = m.from || null;
+    }
+  }
+  if (!frag.childNodes.length) frag.appendChild(el("div", "pEmpty", "No messages yet \u2014 say hi."));
+  dmMessagesEl.replaceChildren(frag);
   updateBubbleTails();
   scheduleDaySeps();
+  scheduleLongSync();
   scrollBottom(true);
 }
 
@@ -1955,17 +2001,23 @@ dmDelOkBtn.addEventListener("click", async () => {
 });
 // The private container needs the same scroll courtesies the room has (the
 // unread chip is a room-only concept, so it is left out here).
+let _dmScrollRaf = 0;
 dmScrollEl.addEventListener("scroll", () => {
-  updateScrollBtn();
   if (rxBarOpen()) closeReactionBar();
   if (rxWhoOpen()) closeReactionWho();
   if (rxPickOpen()) closeEmojiPicker();
-  if (convo.mode === "dm" && isNearBottom()) markDmRead();
+  if (!_dmScrollRaf) {
+    _dmScrollRaf = requestAnimationFrame(() => {
+      _dmScrollRaf = 0;
+      updateScrollBtn();
+      if (convo.mode === "dm" && isNearBottom()) markDmRead();
+    });
+  }
   if (translateOn) {
     clearTimeout(transDebounce);
     transDebounce = setTimeout(() => translateViewport(), 220);
   }
-});
+}, { passive: true });
 updateBackBadge();
 syncBackIcon();
 
@@ -2108,9 +2160,13 @@ function profToggle(el) {
     el.textContent = el.dataset.word || "";
   }
 }
+const _profMaskLive = document.getElementsByClassName("profMask");
 setInterval(() => {
-  const nodes = document.querySelectorAll(".profMask:not(.revealed)");
-  for (const n of nodes) n.textContent = profRandomMask(profMaskLen(n));
+  if (document.hidden || !_profMaskLive.length) return;
+  for (let i = 0; i < _profMaskLive.length; i++) {
+    const n = _profMaskLive[i];
+    if (!n.classList.contains("revealed")) n.textContent = profRandomMask(profMaskLen(n));
+  }
 }, 500);
 const profMaskFrom = (e) => (e.target && e.target.closest ? e.target.closest(".profMask") : null);
 document.addEventListener("click", (e) => {
@@ -4807,39 +4863,71 @@ function buildTextBubble(m, grouped) {
 function addTextBubble(m) {
   const w = buildTextBubble(m, lastMessageFrom() === m.from);
   hostEl().appendChild(w);
-  scheduleLongSync();
+  scheduleLongSync(w.querySelector(".bubble"));
   return w;
 }
+function syncBubblesLongBatch(bubbles) {
+  const items = [];
+  for (const bubble of bubbles) {
+    if (!bubble || !bubble.isConnected) continue;
+    const wrap = bubble.parentElement;
+    if (wrap && wrap.classList && wrap.classList.contains("emojiOnly")) continue;
+    if (bubble.classList.contains("imgBubble") || bubble.classList.contains("voiceBubble") || bubble.classList.contains("ytBubble") || bubble.classList.contains("has-tog")) {
+      bubble.classList.remove("is-long");
+      continue;
+    }
+    const bt = bubble.querySelector(".btext");
+    const ts = bubble.querySelector(".tsrow");
+    if (!bt || !ts) continue;
+    items.push({ bubble, bt, ts, prev: ts.style.marginTop });
+  }
+  if (!items.length) return;
+  // Write pass 1: reset marginTop on all bubbles together
+  for (let i = 0; i < items.length; i++) items[i].ts.style.marginTop = "0px";
+  // Read pass: measure all bubbles in ONE single browser layout pass (zero thrashing)
+  const results = new Array(items.length);
+  for (let i = 0; i < items.length; i++) {
+    const br = items[i].bt.getBoundingClientRect();
+    const tr = items[i].ts.getBoundingClientRect();
+    results[i] = (!br.width && !br.height && !tr.width && !tr.height) ? null : (tr.top >= br.bottom - 2);
+  }
+  // Write pass 2: restore marginTop and apply is-long in one batch
+  for (let i = 0; i < items.length; i++) {
+    items[i].ts.style.marginTop = items[i].prev;
+    if (results[i] !== null) items[i].bubble.classList.toggle("is-long", results[i]);
+  }
+}
 function syncBubbleLong(bubble) {
-  if (!bubble) return;
-  const wrap = bubble.parentElement;
-  if (wrap && wrap.classList && wrap.classList.contains("emojiOnly")) return;
-  if (bubble.classList.contains("imgBubble") || bubble.classList.contains("voiceBubble") || bubble.classList.contains("ytBubble") || bubble.classList.contains("has-tog")) { bubble.classList.remove("is-long"); return; }
-  const bt = bubble.querySelector(".btext");
-  const ts = bubble.querySelector(".tsrow");
-  if (!bt || !ts) return;
-  const br0 = bt.getBoundingClientRect();
-  const tr0 = ts.getBoundingClientRect();
-  if (!br0.width && !br0.height && !tr0.width && !tr0.height) return;
-  const prev = ts.style.marginTop;
-  ts.style.marginTop = "0px";
-  const br = bt.getBoundingClientRect();
-  const tr = ts.getBoundingClientRect();
-  const isLong = tr.top >= br.bottom - 2;
-  ts.style.marginTop = prev;
-  bubble.classList.toggle("is-long", isLong);
+  if (bubble) syncBubblesLongBatch([bubble]);
 }
 function syncAllBubbleLong() {
-  for (const b of document.querySelectorAll(".msg .bubble")) syncBubbleLong(b);
+  const scope = messagesEl || document;
+  syncBubblesLongBatch(scope.querySelectorAll(".msg .bubble"));
 }
 let longSyncQueued = false;
-function scheduleLongSync() {
+let longSyncAll = false;
+const longSyncTargets = new Set();
+function scheduleLongSync(bubble) {
+  if (bubble && bubble.nodeType === 1) longSyncTargets.add(bubble);
+  else longSyncAll = true;
   if (longSyncQueued) return;
   longSyncQueued = true;
-  requestAnimationFrame(() => { longSyncQueued = false; syncAllBubbleLong(); });
+  requestAnimationFrame(() => {
+    longSyncQueued = false;
+    const doAll = longSyncAll;
+    longSyncAll = false;
+    if (doAll) {
+      longSyncTargets.clear();
+      syncAllBubbleLong();
+    } else if (longSyncTargets.size) {
+      const list = [...longSyncTargets];
+      longSyncTargets.clear();
+      syncBubblesLongBatch(list);
+    }
+  });
 }
-window.addEventListener("resize", scheduleLongSync);
-window.addEventListener("orientationchange", scheduleLongSync);
+window.addEventListener("resize", () => scheduleLongSync());
+window.addEventListener("orientationchange", () => scheduleLongSync());
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => scheduleLongSync()).catch(() => {});
 
 /* ---------- day dividers ----------
@@ -4906,17 +4994,25 @@ function refreshReplyCounts(host) {
   const box = host || messagesEl;
   if (!box) return;
   const byId = new Map();
+  const byFrom = new Map();
   const entries = [];
   for (const n of box.children) {
     if (!n.classList || !n.classList.contains("msg")) continue;
     const id = n.dataset && n.dataset.id ? String(n.dataset.id) : "";
     if (id) byId.set(id, n);
-    entries.push({
+    const from = (n.dataset && n.dataset.from) || "";
+    const entry = {
       wrap: n,
-      from: (n.dataset && n.dataset.from) || "",
+      from,
       ts: Number(n.dataset && n.dataset.ts) || 0,
       m: msgByWrap.get(n) || null
-    });
+    };
+    entries.push(entry);
+    if (from) {
+      let arr = byFrom.get(from);
+      if (!arr) { arr = []; byFrom.set(from, arr); }
+      arr.push(entry);
+    }
   }
   const replyMap = new Map();
   for (const e of entries) {
@@ -4930,12 +5026,13 @@ function refreshReplyCounts(host) {
       const rts = Number(r.ts) || 0;
       const rfrom = String(r.from || "");
       if (rts) {
+        const pool = rfrom ? (byFrom.get(rfrom) || []) : entries;
         let bestDiff = Infinity;
-        for (const cand of entries) {
+        for (const cand of pool) {
           if (cand.wrap === e.wrap || !cand.ts) continue;
           const diff = Math.abs(cand.ts - rts);
-          if (rfrom && cand.from === rfrom && diff === 0) { target = cand.wrap; break; }
-          if (rfrom && cand.from === rfrom && diff <= 2000 && diff < bestDiff) { target = cand.wrap; bestDiff = diff; }
+          if (rfrom && diff === 0) { target = cand.wrap; break; }
+          if (rfrom && diff <= 2000 && diff < bestDiff) { target = cand.wrap; bestDiff = diff; }
           else if (!rfrom && diff <= 1500 && diff < bestDiff) { target = cand.wrap; bestDiff = diff; }
         }
       }
@@ -4945,7 +5042,7 @@ function refreshReplyCounts(host) {
     if (!list) { list = []; replyMap.set(target, list); }
     list.push(e.wrap);
   }
-  let layoutChanged = false;
+  const changedBubbles = [];
   for (const e of entries) {
     const replies = replyMap.get(e.wrap);
     const count = replies ? replies.length : 0;
@@ -4953,7 +5050,7 @@ function refreshReplyCounts(host) {
     if (!ts) continue;
     let badge = ts.querySelector(".tsReplyCount");
     if (!count) {
-      if (badge) { badge.remove(); layoutChanged = true; }
+      if (badge) { badge.remove(); changedBubbles.push(e.wrap.querySelector(".bubble")); }
       continue;
     }
     if (!badge) {
@@ -4980,7 +5077,7 @@ function refreshReplyCounts(host) {
       const anchor = ts.querySelector(".editedMark") || ts.querySelector(".tsTime");
       if (anchor) ts.insertBefore(badge, anchor);
       else ts.appendChild(badge);
-      layoutChanged = true;
+      changedBubbles.push(e.wrap.querySelector(".bubble"));
     }
     badge._replies = replies;
     if (badge.dataset.count !== String(count)) {
@@ -4988,10 +5085,12 @@ function refreshReplyCounts(host) {
       badge.innerHTML = '<span class="tsReplyNum">' + count + "</span>" + REPLY_COUNT_SVG;
       badge.title = count === 1 ? "1 reply" : count + " replies";
       badge.setAttribute("aria-label", badge.title);
-      layoutChanged = true;
+      changedBubbles.push(e.wrap.querySelector(".bubble"));
     }
   }
-  if (layoutChanged) scheduleLongSync();
+  for (let i = 0; i < changedBubbles.length; i++) {
+    if (changedBubbles[i]) scheduleLongSync(changedBubbles[i]);
+  }
 }
 let replyCountsQueued = false;
 function scheduleReplyCounts() {
@@ -5069,7 +5168,6 @@ function updateBubbleTails() {
     syncMsgAvatar(m, incoming && !same, incoming && same);
     prevFrom = m.dataset.from || "";
   }
-  scheduleLongSync();
 }
 /* Keeps one `.msg` node's gutter in step with its sender: creates the letter
    chip, re-letters it after a rename, and swaps between avatar and spacer (or
@@ -5149,7 +5247,18 @@ function senderIsBanned(from) {
   return false;
 }
 const CLOCK_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
-const tailObserver = new MutationObserver(() => { updateBubbleTails(); scheduleDaySeps(); scheduleReplyCounts(); });
+let _tailSyncQueued = false;
+function scheduleTailSync() {
+  if (_tailSyncQueued) return;
+  _tailSyncQueued = true;
+  queueMicrotask(() => {
+    _tailSyncQueued = false;
+    updateBubbleTails();
+    scheduleDaySeps();
+    scheduleReplyCounts();
+  });
+}
+const tailObserver = new MutationObserver(scheduleTailSync);
 tailObserver.observe(messagesEl, { childList: true });
 function translateRealtimeMessage(m, wrap) {
   if (!translateOn || !wrap) return;
@@ -6244,6 +6353,8 @@ function firstRealNode() {
 }
 function renderRowsInto(rows) {
   let count = 0;
+  const frag = document.createDocumentFragment();
+  let prevFrom = withMsgHost(roomMessagesEl, () => lastMessageFrom());
   for (const row of rows) {
     try {
       const id = "sb-" + row.id;
@@ -6256,9 +6367,15 @@ function renderRowsInto(rows) {
       // the fetch was in flight, or it was drawn from the buffer). The row is
       // remembered above either way, so it can never be drawn twice.
       if (alreadyRendered(roomMessagesEl, m)) continue;
-      addRoomMessageDom(m);
+      const grouped = !!(prevFrom && m.from && prevFrom === m.from);
+      frag.appendChild(withMsgHost(roomMessagesEl, () => buildMessageDom(m, grouped)));
+      prevFrom = m.from || null;
       count++;
     } catch (e) { console.error("render-sb-row", row.id, e); }
+  }
+  if (count) {
+    roomMessagesEl.appendChild(frag);
+    scheduleLongSync();
   }
   return count;
 }
@@ -6870,68 +6987,86 @@ function connect() {  // Exactly one live socket at a time. A reconnect replaces
     reconnectDelay = 500;
     try { clearTimeout(linkDownTimer); } catch (e) {}
     try {
-      const loc = await getMyIPLocation();
-      try { s.rpc.reportLoc(loc).catch(() => {}); } catch (e) {}
+      // Do not block startup on external IP geolocation: use cached value
+      // immediately and refresh in the background.
+      const cachedGeo = geoFromCache();
+      let loc = cachedGeo ? (cachedGeo.loc || "") : "";
+      if (cachedGeo && cachedGeo.country) myCountry = cachedGeo.country;
+      getMyIPLocation().then((freshLoc) => {
+        if (freshLoc) { try { s.rpc.reportLoc(freshLoc).catch(() => {}); } catch (e) {} }
+      }).catch(() => {});
+      if (loc) { try { s.rpc.reportLoc(loc).catch(() => {}); } catch (e) {} }
+
+      // Kick off independent room metadata & reply KV fetches in parallel
+      // immediately so they finish alongside login instead of serially.
+      const replyKvP = replyKvEnsure().catch(() => {});
+      const pfpsP = s.rpc.getPfps("").then((raw) => {
+        try {
+          const pf = JSON.parse(raw);
+          if (pf && typeof pf === "object") {
+            for (const k of Object.keys(pf)) {
+              const u = String(pf[k] || "");
+              if (k && u) pfpMap[k] = u;
+            }
+            savePfpMap();
+            refreshAvatars();
+          }
+        } catch (e) {}
+      }).catch(() => {});
+      const metaRestP = Promise.all([
+        s.rpc.getBanned("").then((raw) => {
+          try {
+            const b = JSON.parse(raw);
+            if (Array.isArray(b)) for (const n of b) bannedNames.add(n);
+          } catch (e) {}
+        }).catch(() => {}),
+        s.rpc.getTitle("").then((t) => { if (t) setRoomTitle(t); }).catch(() => {}),
+        s.rpc.getIcon("").then((ic) => { if (ic) applyIcon(ic); }).catch(() => {}),
+        s.rpc.getVerified("").then((v) => {
+          try {
+            const varr = JSON.parse(v);
+            if (Array.isArray(varr)) { verifiedSet.clear(); for (const n of varr) verifiedSet.add(n); refreshVerifiedUI(); }
+          } catch (e) {}
+        }).catch(() => {})
+      ]);
+
       await ensureKvNick();
       if (savedNick && needsPass(savedNick) && !savedAdminPass) promptNickReentry();
-      if (savedNick && !currentApplied && !(needsPass(savedNick) && !savedAdminPass)) {
-        currentApplied = true;
-        let r = null;
-        try {
-          const payload = JSON.stringify({ name: savedNick, uid: myUid, ...(needsPass(savedNick) && savedAdminPass ? { password: savedAdminPass } : {}), loc });
-          r = await claimSavedName(s, payload, 8000);
-        } catch (err) { r = null; }
-        if (r === "ok") {
-          myName = savedNick;
-          savedNickApplied = true;
-          joinedOnce = true;
-          reclassifyOwnership();
-          updateGate();
-          persistNick(savedNick, needsPass(savedNick) ? savedAdminPass : "");
-          if (savedNick === "admin") addAdminActionButtons();
-          vpnModal.classList.add("hide");
-        }
-        if (r === "banned") { bannedOnConnect = true; showBannedModal(); }
-        else if (r === "unavailable_region") { showRegionBlocked(); }
-        else if (r === "vpn_blocked") { showVpnBlocked(); }
-        else if (r === "wrong_password") { if (needsPass(savedNick)) promptNickReentry(); }
-
-        else if (r === "name_taken") { const taken = savedNick; savedNick = ""; lsSet(nickKvKey, ""); showNameTaken(taken); }
-        else if (savedNick && r !== "ok" && !savedNickApplied) silentAutoLoginRetry(s, loc);
-      }
-      if (!savedNickApplied && !savedNick && !joinedOnce && tacAgreed && ageApproved && !bannedOnConnect && !vpnBlocked) forceNick();
-      await replyKvEnsure();
-      // Pull the room's profile pictures before the first message render so
-      // avatars appear painted (no initial-letter flash).
-      try {
-        const pf = JSON.parse(await s.rpc.getPfps(""));
-        if (pf && typeof pf === "object") {
-          for (const k of Object.keys(pf)) {
-            const u = String(pf[k] || "");
-            if (k && u) pfpMap[k] = u;
+      const loginP = (async () => {
+        if (savedNick && !currentApplied && !(needsPass(savedNick) && !savedAdminPass)) {
+          currentApplied = true;
+          let r = null;
+          try {
+            const payload = JSON.stringify({ name: savedNick, uid: myUid, ...(needsPass(savedNick) && savedAdminPass ? { password: savedAdminPass } : {}), loc });
+            r = await claimSavedName(s, payload, 8000);
+          } catch (err) { r = null; }
+          if (r === "ok") {
+            myName = savedNick;
+            savedNickApplied = true;
+            joinedOnce = true;
+            reclassifyOwnership();
+            updateGate();
+            persistNick(savedNick, needsPass(savedNick) ? savedAdminPass : "");
+            if (savedNick === "admin") addAdminActionButtons();
+            vpnModal.classList.add("hide");
           }
-          savePfpMap();
-          refreshAvatars();
+          if (r === "banned") { bannedOnConnect = true; showBannedModal(); }
+          else if (r === "unavailable_region") { showRegionBlocked(); }
+          else if (r === "vpn_blocked") { showVpnBlocked(); }
+          else if (r === "wrong_password") { if (needsPass(savedNick)) promptNickReentry(); }
+          else if (r === "name_taken") { const taken = savedNick; savedNick = ""; lsSet(nickKvKey, ""); showNameTaken(taken); }
+          else if (savedNick && r !== "ok" && !savedNickApplied) silentAutoLoginRetry(s, loc);
         }
-      } catch (e) {}
-      await reloadChatHistory();
-      try {
-        const b = JSON.parse(await s.rpc.getBanned(""));
-        if (Array.isArray(b)) for (const n of b) bannedNames.add(n);
-      } catch (e) {}
+        if (!savedNickApplied && !savedNick && !joinedOnce && tacAgreed && ageApproved && !bannedOnConnect && !vpnBlocked) forceNick();
+      })();
+
+      // Wait for reply KV + PFPs (already in flight) then render history in parallel with login.
+      const historyP = Promise.all([replyKvP, pfpsP]).then(() => reloadChatHistory());
+      await Promise.all([loginP, historyP, metaRestP]);
       loadReactions();
       loadPinned();
       if (translateOn) retranslateAll();
       if (isAdmin()) addAdminActionButtons();
-      const t = await s.rpc.getTitle("");
-      if (t) setRoomTitle(t);
-      const ic = await s.rpc.getIcon("");
-      if (ic) applyIcon(ic);
-      const v = await s.rpc.getVerified("");
-      try {
-        const varr = JSON.parse(v);
-        if (Array.isArray(varr)) { verifiedSet.clear(); for (const n of varr) verifiedSet.add(n); refreshVerifiedUI(); }
-      } catch (e) {}
       // Seed the private-chat list and its unread badge straight away, rather
       // than waiting for the people screen to be opened.
       refreshPeople();
@@ -7231,56 +7366,74 @@ function renderEmojiTabs() {
 }
 
 let _emojiSeg = null;
+const _emojiSplitCache = new Map();
 function splitEmojis(str) {
   const s = String(str || "");
   if (!s) return [];
+  const cached = _emojiSplitCache.get(s);
+  if (cached) return cached;
+  let out;
   if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
     if (!_emojiSeg) _emojiSeg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-    return Array.from(_emojiSeg.segment(s), seg => seg.segment);
+    out = Array.from(_emojiSeg.segment(s), seg => seg.segment);
+  } else {
+    out = Array.from(s);
   }
-  return Array.from(s);
+  if (_emojiSplitCache.size < 32) _emojiSplitCache.set(s, out);
+  return out;
 }
 
 const BACKSPACE_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 5H9l-7 7 7 7h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z"/><path d="M12 9.5l5 5M17 9.5l-5 5"/></svg>';
 
-function addEmojiSection(title, ems, empty) {
+// Delegated listeners on emojiGridEl replace hundreds of per-button closures.
+emojiGridEl.addEventListener("mousedown", (e) => {
+  if (e.target && e.target.closest && e.target.closest(".emojiCell")) e.preventDefault();
+});
+emojiGridEl.addEventListener("click", (e) => {
+  const cell = e.target && e.target.closest ? e.target.closest(".emojiCell") : null;
+  if (!cell) return;
+  e.stopPropagation();
+  insertEmoji(cell.textContent);
+});
+
+function addEmojiSection(frag, title, ems, empty) {
   const head = document.createElement("div");
   head.className = "emojiCatHead";
   const t = document.createElement("span");
   t.className = "emojiCatTitle";
   t.textContent = title;
   head.appendChild(t);
-  emojiGridEl.appendChild(head);
+  frag.appendChild(head);
   if (empty) {
     const e = document.createElement("div");
     e.className = "emojiEmpty";
     e.textContent = "Tap emojis and they'll show up here";
-    emojiGridEl.appendChild(e);
+    frag.appendChild(e);
     return;
   }
-  for (const em of ems) {
+  for (let i = 0; i < ems.length; i++) {
     const c = document.createElement("button");
     c.type = "button";
     c.className = "emojiCell";
-    c.textContent = em;
-    c.addEventListener("mousedown", (e) => e.preventDefault());
-    c.addEventListener("click", (e) => { e.stopPropagation(); insertEmoji(em); });
-    emojiGridEl.appendChild(c);
+    c.textContent = ems[i];
+    frag.appendChild(c);
   }
 }
 
 function renderEmojiGrid(catId) {
-  emojiGridEl.innerHTML = "";
+  const frag = document.createDocumentFragment();
   if (catId === "recents") {
-    if (emojiRecents.length) addEmojiSection("Recents", emojiRecents);
-    else addEmojiSection("Recents", [], true);
+    if (emojiRecents.length) addEmojiSection(frag, "Recents", emojiRecents);
+    else addEmojiSection(frag, "Recents", [], true);
     if (emojiRecents.length < 24) {
-      addEmojiSection("Popular", splitEmojis(EMOJI_POPULAR).filter(e => !emojiRecents.includes(e)));
+      addEmojiSection(frag, "Popular", splitEmojis(EMOJI_POPULAR).filter(e => !emojiRecents.includes(e)));
     }
+    emojiGridEl.replaceChildren(frag);
     return;
   }
   const cat = EMOJI_CATS.find(c => c.id === catId);
-  addEmojiSection(cat ? cat.name : "", splitEmojis(EMOJI_MAP[catId] || ""));
+  addEmojiSection(frag, cat ? cat.name : "", splitEmojis(EMOJI_MAP[catId] || ""));
+  emojiGridEl.replaceChildren(frag);
 }
 
 function switchEmojiCat(catId) {
@@ -9303,6 +9456,34 @@ function positionEmojiPicker() {
   const cx = r.left + r.width / 2 - left;
   rxPickTail.style.left = Math.round(Math.max(14, Math.min(cx, w - 14))) + "px";
 }
+let _rxParsedGroups = null;
+function rxParsedGroups() {
+  if (_rxParsedGroups) return _rxParsedGroups;
+  _rxParsedGroups = EMOJI_GROUPS.map((grp) => {
+    const raw = grp[1].split("\u0001");
+    const items = new Array(raw.length);
+    for (let i = 0; i < raw.length; i++) {
+      const item = raw[i];
+      const sp = item.indexOf(" ");
+      const emoji = sp === -1 ? item : item.slice(0, sp);
+      const name = sp === -1 ? "" : item.slice(sp + 1);
+      items[i] = { emoji, name, low: name.toLowerCase() };
+    }
+    return { title: grp[0], items };
+  });
+  return _rxParsedGroups;
+}
+// Delegated listeners on rxPickBody replace ~3,600 per-button event listeners.
+rxPickBody.addEventListener("pointerdown", (ev) => {
+  if (ev.target && ev.target.closest && ev.target.closest(".rxPickBtn")) ev.stopPropagation();
+});
+rxPickBody.addEventListener("click", (ev) => {
+  const b = ev.target && ev.target.closest ? ev.target.closest(".rxPickBtn") : null;
+  if (!b) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  rxPickChoose(b.textContent);
+});
 function rxPickBtn(emoji, name) {
   const b = document.createElement("button");
   b.type = "button";
@@ -9310,8 +9491,6 @@ function rxPickBtn(emoji, name) {
   b.textContent = emoji;
   b.title = name || emoji;
   b.setAttribute("aria-label", name || emoji);
-  b.addEventListener("pointerdown", (ev) => ev.stopPropagation());
-  b.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); rxPickChoose(emoji); });
   return b;
 }
 function rxPickSection(title) {
@@ -9325,42 +9504,71 @@ function rxPickGrid() {
   g.className = "rxPickGrid";
   return g;
 }
+let _rxStaticNodes = null;
+function rxStaticCatalog() {
+  if (_rxStaticNodes) return _rxStaticNodes;
+  const wrap = document.createElement("div");
+  for (const grp of rxParsedGroups()) {
+    const g = rxPickGrid();
+    for (let i = 0; i < grp.items.length; i++) {
+      const it = grp.items[i];
+      g.appendChild(rxPickBtn(it.emoji, it.name));
+    }
+    wrap.appendChild(rxPickSection(grp.title));
+    wrap.appendChild(g);
+  }
+  _rxStaticNodes = wrap;
+  return wrap;
+}
+let _rxLastQuery = null;
+let _rxLastRecentSig = null;
 function renderEmojiPicker(q) {
   const low = String(q || "").trim().toLowerCase();
-  rxPickBody.textContent = "";
-  let any = false;
   if (!low) {
     const recent = rxRecents();
+    const recentSig = recent.join("\u0001");
+    if (_rxLastQuery === "" && _rxLastRecentSig === recentSig && rxPickBody.childNodes.length) {
+      rxPickBody.scrollTop = 0;
+      return;
+    }
+    _rxLastQuery = "";
+    _rxLastRecentSig = recentSig;
+    const frag = document.createDocumentFragment();
     if (recent.length) {
       const g = rxPickGrid();
       for (const e of recent) g.appendChild(rxPickBtn(e, e + " \u00b7 recent"));
-      rxPickBody.appendChild(rxPickSection("Recently used"));
-      rxPickBody.appendChild(g);
-      any = true;
+      frag.appendChild(rxPickSection("Recently used"));
+      frag.appendChild(g);
     }
+    frag.appendChild(rxStaticCatalog());
+    rxPickBody.replaceChildren(frag);
+    rxPickBody.scrollTop = 0;
+    return;
   }
-  for (const grp of EMOJI_GROUPS) {
+  _rxLastQuery = low;
+  const frag = document.createDocumentFragment();
+  let any = false;
+  for (const grp of rxParsedGroups()) {
     const g = rxPickGrid();
     let n = 0;
-    for (const item of grp[1].split("\u0001")) {
-      const sp = item.indexOf(" ");
-      const emoji = sp === -1 ? item : item.slice(0, sp);
-      const name = sp === -1 ? "" : item.slice(sp + 1);
-      if (low && name.toLowerCase().indexOf(low) === -1) continue;
-      g.appendChild(rxPickBtn(emoji, name));
+    for (let i = 0; i < grp.items.length; i++) {
+      const it = grp.items[i];
+      if (it.low.indexOf(low) === -1) continue;
+      g.appendChild(rxPickBtn(it.emoji, it.name));
       n++;
     }
     if (!n) continue;
-    rxPickBody.appendChild(rxPickSection(grp[0]));
-    rxPickBody.appendChild(g);
+    frag.appendChild(rxPickSection(grp.title));
+    frag.appendChild(g);
     any = true;
   }
   if (!any) {
     const empty = document.createElement("div");
     empty.className = "rxPickEmpty";
     empty.textContent = "No emoji match that search";
-    rxPickBody.appendChild(empty);
+    frag.appendChild(empty);
   }
+  rxPickBody.replaceChildren(frag);
   rxPickBody.scrollTop = 0;
 }
 function rxPickChoose(emoji) {
@@ -9370,7 +9578,13 @@ function rxPickChoose(emoji) {
   closeEmojiPicker();
   if (m) toggleReaction(m, emoji);
 }
-rxPickSearch.addEventListener("input", () => renderEmojiPicker(rxPickSearch.value));
+let _rxSearchTimer = 0;
+rxPickSearch.addEventListener("input", () => {
+  clearTimeout(_rxSearchTimer);
+  const v = rxPickSearch.value;
+  if (!v.trim()) { renderEmojiPicker(""); return; }
+  _rxSearchTimer = setTimeout(() => renderEmojiPicker(rxPickSearch.value), 60);
+});
 rxPickSearch.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeEmojiPicker(); });
 
 // Tapping anywhere that isn't the bar or another message dismisses it; tapping
