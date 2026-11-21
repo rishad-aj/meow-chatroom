@@ -139,13 +139,37 @@ function isEmoji(s) {
   }
   return pict > 0;
 }
+var _metaCache = {};
+var _metaPending = {};
+var META_TTL_MS = 2500;
+function metaInvalidate(key) {
+  if (key) { delete _metaCache[key]; delete _metaPending[key]; }
+}
 function metaGet(key, fb) {
-  return restJson("room_meta?select=value&key=eq." + encodeURIComponent(key)).then(function (r) {
-    if (Array.isArray(r) && r.length && r[0] && r[0].value !== undefined) return r[0].value;
-    return fb;
+  var now = Date.now();
+  var hit = _metaCache[key];
+  if (hit && (now - hit.t) < META_TTL_MS) {
+    return Promise.resolve(hit.has ? hit.v : fb);
+  }
+  if (_metaPending[key]) {
+    return _metaPending[key].then(function (res) { return res.has ? res.v : fb; });
+  }
+  var p = restJson("room_meta?select=value&key=eq." + encodeURIComponent(key)).then(function (r) {
+    delete _metaPending[key];
+    var has = Array.isArray(r) && r.length && r[0] && r[0].value !== undefined;
+    var val = has ? r[0].value : undefined;
+    _metaCache[key] = { t: Date.now(), has: has, v: val };
+    return { has: has, v: val };
+  }).catch(function () {
+    delete _metaPending[key];
+    return { has: false, v: undefined };
   });
+  _metaPending[key] = p;
+  return p.then(function (res) { return res.has ? res.v : fb; });
 }
 function metaSet(key, value) {
+  _metaCache[key] = { t: Date.now(), has: true, v: value };
+  delete _metaPending[key];
   return rest("room_meta", "POST", { key: key, value: value }).then(function (r) {
     if (r.ok) return true;
     return rest("room_meta?key=eq." + encodeURIComponent(key), "PATCH", { value: value }).then(function (r2) { return r2.ok; }).catch(function () { return false; });
@@ -214,8 +238,23 @@ function dmRowToMsg(row) {
   else { m.url = row.url || ""; m.dur = row.dur || 0; m.size = row.size || 0; }
   return { msg: m, meta: meta };
 }
+var _dmRowsCache = null;
+var _dmRowsPending = null;
+function dmRowsInvalidate() { _dmRowsCache = null; }
 function dmRowsAll() {
-  return restJson("messages?select=id,ts,sender,type,text,url,dur,size,reply_to&type=like.dm.*&order=ts.desc&limit=2000").then(function (r) { return Array.isArray(r) ? r : []; });
+  var now = Date.now();
+  if (_dmRowsCache && (now - _dmRowsCache.t) < 1500) return Promise.resolve(_dmRowsCache.rows);
+  if (_dmRowsPending) return _dmRowsPending;
+  _dmRowsPending = restJson("messages?select=id,ts,sender,type,text,url,dur,size,reply_to&type=like.dm.*&order=ts.desc&limit=2000").then(function (r) {
+    _dmRowsPending = null;
+    var rows = Array.isArray(r) ? r : [];
+    _dmRowsCache = { t: Date.now(), rows: rows };
+    return rows;
+  }).catch(function () {
+    _dmRowsPending = null;
+    return [];
+  });
+  return _dmRowsPending;
 }
 var LANG_CODE = { english: "en", spanish: "es", french: "fr", german: "de", portuguese: "pt", italian: "it", russian: "ru", ukrainian: "uk", polish: "pl", dutch: "nl", turkish: "tr", arabic: "ar", hindi: "hi", bengali: "bn", urdu: "ur", chinese: "zh-CN", japanese: "ja", korean: "ko", vietnamese: "vi", thai: "th", indonesian: "id", malay: "ms", filipino: "tl", swahili: "sw", malayalam: "ml", tamil: "ta", hebrew: "he" };
 var TARGET_ALIAS = { zh: "zh-CN", "zh-cn": "zh-CN", fil: "tl", iw: "he" };
@@ -396,7 +435,18 @@ SupaSocket.prototype._suppressLeave = function (nm) {
 SupaSocket.prototype._emit = function (obj) {
   try {
     if (obj && obj.t === "rename" && obj.from) this._suppressLeave(obj.from);
-    else if (obj && obj.t === "ban" && obj.name) this._suppressLeave(obj.name);
+    else if (obj && obj.t === "ban" && obj.name) { this._suppressLeave(obj.name); metaInvalidate("bans"); }
+    else if (obj && obj.t === "unban") metaInvalidate("bans");
+    else if (obj && obj.t === "pfp") metaInvalidate("pfps");
+    else if (obj && obj.t === "title") metaInvalidate("title");
+    else if (obj && obj.t === "icon") metaInvalidate("icon");
+    else if (obj && (obj.t === "verified" || obj.t === "unverified")) metaInvalidate("verified");
+    else if (obj && (obj.t === "pin" || obj.t === "unpin")) metaInvalidate("pinned");
+    else if (obj && obj.t === "react") { metaInvalidate("rx"); metaInvalidate("rxnames"); }
+    else if (obj && obj.t === "dm") {
+      dmRowsInvalidate();
+      if (obj.ev === "read") metaInvalidate("dm_reads");
+    }
     else if (obj && obj.t === "system" && obj.text) {
       var sm = String(obj.text).trim().match(/^(.+?)\s+(left|was banned|deleted their account)$/i);
       if (sm && sm[1]) this._suppressLeave(sm[1].trim());

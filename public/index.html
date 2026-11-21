@@ -8,6 +8,11 @@
 <meta property="og:title" content="Chat Room">
 <meta property="og:description" content="Free online group chat room. No sign-up.">
 <meta name="theme-color" content="#1f1f21">
+<link rel="preconnect" href="https://yvqndfyiwkegxkeolvoh.supabase.co" crossorigin>
+<link rel="preconnect" href="https://esm.sh" crossorigin>
+<link rel="preconnect" href="https://user.uploads.dev" crossorigin>
+<link rel="modulepreload" href="./shim.js">
+<link rel="modulepreload" href="./app.js">
 <link rel="manifest" href="https://user.uploads.dev/file/25455502383c588f70e0be7cce93247d.json">
 <link rel="apple-touch-icon" href="https://user.uploads.dev/file/b6802c73e0b623361cc1949c6b29a267.png">
 <style>
@@ -453,6 +458,7 @@
     pointer-events: none;
     opacity: 0;
     transform: translateY(-8px);
+    will-change: opacity, transform;
     transition: opacity 0.22s ease, transform 0.22s ease;
   }
   #stickyDateWrap.show #stickyDate {
@@ -522,7 +528,7 @@
     from { opacity: 0; transform: translateY(10px) scale(0.98); }
     to { opacity: 1; transform: none; }
   }
-  .msg { display: flex; }
+  .msg { display: flex; contain: style; }
   .msg.out { justify-content: flex-end; }
   .bubble {
     --bw: 0px;
