@@ -7,5 +7,8 @@
     "build": "echo 'Build complete'",
     "start": "node server.js",
     "lint": "node --check server.js && node --check public/app.js && node --check public/shim.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.2"
   }
 }

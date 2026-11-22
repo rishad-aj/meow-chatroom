@@ -4,33 +4,70 @@
    Realtime transport: Supabase Realtime (broadcast + presence).
    History/media: the app's own Supabase mirror (messages table) - unchanged.
    Translation: Google Translate via /api/translate (no key needed). */
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 window.generatorName = window.generatorName || "chat";
 (function () {
 "use strict";
 var DEF_URL = "https://yvqndfyiwkegxkeolvoh.supabase.co";
 var DEF_KEY = "sb_publishable_AVPKoEterodpUPjlLCn3RA_d6q3ZJNn";
-var CFG = { url: DEF_URL, key: DEF_KEY };
+var CFG = { url: DEF_URL, publicUrl: DEF_URL, key: DEF_KEY, proxy: false };
 try {
-  if (window.__SUPABASE_URL) CFG.url = window.__SUPABASE_URL;
+  if (window.__SUPABASE_URL) { CFG.url = window.__SUPABASE_URL; CFG.publicUrl = window.__SUPABASE_URL; }
   if (window.__SUPABASE_ANON_KEY) CFG.key = window.__SUPABASE_ANON_KEY;
 } catch (e) {}
+var _createClientFn = (window.supabase && typeof window.supabase.createClient === "function")
+  ? window.supabase.createClient
+  : null;
+var _createClientPromise = null;
+function loadCreateClient() {
+  if (_createClientFn) return Promise.resolve(_createClientFn);
+  if (window.supabase && typeof window.supabase.createClient === "function") {
+    _createClientFn = window.supabase.createClient;
+    return Promise.resolve(_createClientFn);
+  }
+  if (!_createClientPromise) {
+    _createClientPromise = import("https://esm.sh/@supabase/supabase-js@2.47.10").then(function (m) {
+      _createClientFn = m && m.createClient ? m.createClient : null;
+      return _createClientFn;
+    }).catch(function () { return null; });
+  }
+  return _createClientPromise;
+}
 var configReady = new Promise(function (res) {
   var done = false;
-  function fin() { if (!done) { done = true; res(true); } }
+  function fin() {
+    if (!done) {
+      done = true;
+      window.__SB_API_URL = CFG.url;
+      window.__SB_PUBLIC_URL = CFG.publicUrl;
+      window.__SB_KEY = CFG.key;
+      res(true);
+    }
+  }
   fetch("/api/config").then(function (r) { return r.json(); }).then(function (j) {
-    if (j && j.url && j.key) { CFG.url = j.url; CFG.key = j.key; }
+    if (j && j.url && j.key) {
+      CFG.publicUrl = j.url;
+      CFG.key = j.key;
+      if (j.proxy && window.location && /^https?:$/i.test(window.location.protocol)) {
+        CFG.proxy = true;
+        CFG.url = window.location.origin + "/sb";
+      } else {
+        CFG.url = j.url;
+      }
+    }
     fin();
   }).catch(fin);
   setTimeout(fin, 2500);
 });
+window.__sbConfigReady = configReady;
 function sbH() {
   return { apikey: CFG.key, Authorization: "Bearer " + CFG.key, "Content-Type": "application/json", Prefer: "return=minimal" };
 }
 function rest(path, method, body) {
-  var opt = { method: method || "GET", headers: sbH() };
-  if (body !== undefined) opt.body = JSON.stringify(body);
-  return fetch(CFG.url + "/rest/v1/" + path, opt);
+  return configReady.then(function () {
+    var opt = { method: method || "GET", headers: sbH() };
+    if (body !== undefined) opt.body = JSON.stringify(body);
+    return fetch(CFG.url + "/rest/v1/" + path, opt);
+  });
 }
 function restJson(path) {
   return rest(path, "GET").then(function (r) { return r.json(); }).catch(function () { return null; });
@@ -38,7 +75,11 @@ function restJson(path) {
 var _sb = null;
 function sbClient() {
   if (_sb) return _sb;
-  _sb = createClient(CFG.url, CFG.key);
+  if (!_createClientFn && window.supabase && typeof window.supabase.createClient === "function") {
+    _createClientFn = window.supabase.createClient;
+  }
+  if (!_createClientFn) throw new Error("Supabase client library unavailable");
+  _sb = _createClientFn(CFG.url, CFG.key);
   return _sb;
 }
 function sha256Hex(s) {
@@ -291,10 +332,12 @@ function uploadBlob(blob) {
   else if (t.indexOf("webm") !== -1) ext = "webm";
   else if (t.indexOf("mp4") !== -1 || t.indexOf("m4a") !== -1 || t.indexOf("aac") !== -1) ext = "m4a";
   var name = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10) + "." + ext;
-  var headers = { apikey: CFG.key, Authorization: "Bearer " + CFG.key, "Content-Type": t || "application/octet-stream", "x-upsert": "true" };
-  return fetch(CFG.url + "/storage/v1/object/chat-media/" + name, { method: "POST", headers: headers, body: blob }).then(function (r) {
-    if (!r.ok) throw new Error("upload " + r.status);
-    return { url: CFG.url + "/storage/v1/object/public/chat-media/" + name, error: null };
+  return configReady.then(function () {
+    var headers = { apikey: CFG.key, Authorization: "Bearer " + CFG.key, "Content-Type": t || "application/octet-stream", "x-upsert": "true" };
+    return fetch(CFG.url + "/storage/v1/object/chat-media/" + name, { method: "POST", headers: headers, body: blob }).then(function (r) {
+      if (!r.ok) throw new Error("upload " + r.status);
+      return { url: (CFG.publicUrl || CFG.url) + "/storage/v1/object/public/chat-media/" + name, error: null };
+    });
   }).catch(function (e) { return { url: "", error: String((e && e.message) || e) }; });
 }
 function SupaSocket() {
@@ -438,7 +481,7 @@ SupaSocket.prototype._fail = function (err) {
 };
 SupaSocket.prototype._init = function () {
   var self = this;
-  configReady.then(function () {
+  Promise.all([configReady, loadCreateClient()]).then(function () {
   var chan;
   try {
     chan = sbClient().channel("chat-room-v1", { config: { broadcast: { self: true }, presence: { key: self._presenceKey } } });
@@ -1025,18 +1068,24 @@ SupaSocket.prototype.rpc.setName = function (data) {
   if (/^admin$/i.test(name)) {
     if (!pass) return Promise.resolve("password_required");
     if (attemptsHit(ADMIN_NAME)) return Promise.resolve("too_many_attempts");
-    return acctGet(ADMIN_NAME).then(function (acct) {
-      if (acct && acct.pass_hash) {
-        return hashPw(pass, ADMIN_NAME).then(function (h) {
-          if (h !== acct.pass_hash) return "wrong_password";
-          attemptsClear(ADMIN_NAME);
-          return finish(ADMIN_NAME);
-        });
-      }
-      return fetch("/api/admin-login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pass }) }).then(function (r) { return r.json(); }).then(function (j) {
-        if (!j || !j.ok) return "wrong_password";
+    return fetch("/api/admin-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pass })
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j && j.ok) {
         attemptsClear(ADMIN_NAME);
         return finish(ADMIN_NAME);
+      }
+      return acctGet(ADMIN_NAME).then(function (acct) {
+        if (acct && acct.pass_hash && /^[a-f0-9]{64}$/i.test(String(acct.pass_hash))) {
+          return hashPw(pass, ADMIN_NAME).then(function (h) {
+            if (h !== String(acct.pass_hash).toLowerCase()) return "wrong_password";
+            attemptsClear(ADMIN_NAME);
+            return finish(ADMIN_NAME);
+          });
+        }
+        return "wrong_password";
       }).catch(function () { return "wrong_password"; });
     }).catch(function () { return "wrong_password"; });
   }
@@ -1256,31 +1305,32 @@ SupaSocket.prototype.rpc.changePassword = function (data) {
   if (attemptsHit(name)) return Promise.resolve("too_many_attempts");
   if (/^admin$/i.test(name)) {
     if (!curPass) return Promise.resolve("password_required");
-    return acctGet(ADMIN_NAME).then(function (acct) {
-      if (acct === null) return "db_error";
-      if (acct && acct.pass_hash) {
-        return hashPw(curPass, ADMIN_NAME).then(function (h) {
-          if (h !== acct.pass_hash) return "wrong_password";
+    return fetch("/api/admin-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: curPass })
+    }).then(function (r) { return r.json(); }).catch(function () { return { ok: false }; }).then(function (j) {
+      return acctGet(ADMIN_NAME).then(function (acct) {
+        if (acct === null) return "db_error";
+        var saveNew = function () {
           return hashPw(newPass, ADMIN_NAME).then(function (nh) {
-            return acctSetHash(ADMIN_NAME, nh).then(function (okc) {
+            var save = acct ? acctSetHash(ADMIN_NAME, nh) : acctCreate(ADMIN_NAME, ADMIN_NAME, nh);
+            return save.then(function (okc) {
               if (!okc) return "db_error";
               attemptsClear(ADMIN_NAME);
               return "ok";
             });
           });
-        });
-      }
-      return fetch("/api/admin-login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: curPass }) }).then(function (r) { return r.json(); }).then(function (j) {
-        if (!j || !j.ok) return "wrong_password";
-        return hashPw(newPass, ADMIN_NAME).then(function (nh) {
-          var save = acct ? acctSetHash(ADMIN_NAME, nh) : acctCreate(ADMIN_NAME, ADMIN_NAME, nh);
-          return save.then(function (okc) {
-            if (!okc) return "db_error";
-            attemptsClear(ADMIN_NAME);
-            return "ok";
+        };
+        if (j && j.ok) return saveNew();
+        if (acct && acct.pass_hash && /^[a-f0-9]{64}$/i.test(String(acct.pass_hash))) {
+          return hashPw(curPass, ADMIN_NAME).then(function (h) {
+            if (h !== String(acct.pass_hash).toLowerCase()) return "wrong_password";
+            return saveNew();
           });
-        });
-      }).catch(function () { return "wrong_password"; });
+        }
+        return "wrong_password";
+      });
     }).catch(function () { return "db_error"; });
   }
   return acctGet(name).then(function (acct) {

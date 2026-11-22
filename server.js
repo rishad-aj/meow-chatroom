@@ -1,11 +1,34 @@
 const http = require("http");
+const https = require("https");
+const tls = require("tls");
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const { URL } = require("url");
 
 const PORT = Number(process.env.PORT) || 3000;
-const PUBLIC_DIR = path.join(__dirname, "public");
+const PUBLIC_DIR = path.resolve(__dirname, "public");
+const SUPABASE_BUNDLE_PATH = path.resolve(
+  __dirname,
+  "node_modules",
+  "@supabase",
+  "supabase-js",
+  "dist",
+  "umd",
+  "supabase.js"
+);
+const SUPABASE_ORIGIN = (() => {
+  try {
+    const u = new URL(process.env.SUPABASE_URL || "https://yvqndfyiwkegxkeolvoh.supabase.co");
+    if (u.protocol !== "https:") throw new Error("Only https Supabase origin is allowed");
+    return u;
+  } catch (e) {
+    return new URL("https://yvqndfyiwkegxkeolvoh.supabase.co");
+  }
+})();
+
+const ALLOWED_SB_PREFIXES = ["/rest/v1/", "/storage/v1/", "/realtime/v1/"];
+const MAX_BODY_BYTES = 1024 * 1024; // 1 MB for JSON API routes
 
 const apiHandlers = {
   "/api/config": require("./api/config.js"),
@@ -70,10 +93,10 @@ function loadStaticEntry(filePath, stats, ext, cb) {
   });
 }
 
-function serveStaticEntry(req, res, entry) {
+function serveStaticEntry(req, res, entry, cacheControl) {
   res.setHeader("Content-Type", entry.mime);
   res.setHeader("ETag", entry.etag);
-  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Cache-Control", cacheControl || "no-cache");
   if (entry.compressible) res.setHeader("Vary", "Accept-Encoding");
 
   if (req.headers["if-none-match"] === entry.etag) {
@@ -120,8 +143,21 @@ function readBody(req) {
       return;
     }
     const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
+    let total = 0;
+    let exceeded = false;
+    req.on("data", (chunk) => {
+      total += chunk.length;
+      if (total > MAX_BODY_BYTES) {
+        exceeded = true;
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => {
+      if (exceeded) {
+        resolve({});
+        return;
+      }
       const raw = Buffer.concat(chunks).toString("utf8");
       if (!raw) {
         resolve({});
@@ -137,14 +173,116 @@ function readBody(req) {
   });
 }
 
+function isAllowedSupabasePath(sbPath) {
+  if (!sbPath || sbPath.includes("..") || sbPath.includes("\\")) return false;
+  return ALLOWED_SB_PREFIXES.some((prefix) => sbPath.startsWith(prefix));
+}
+
+function proxySupabaseHttp(req, res, parsedUrl) {
+  const sbPath = parsedUrl.pathname.slice(3) + (parsedUrl.search || "");
+  if (!isAllowedSupabasePath(parsedUrl.pathname.slice(3))) {
+    res.status(403).json({ error: "Forbidden proxy path" });
+    return;
+  }
+
+  const headers = {};
+  const skipHeaders = new Set([
+    "host",
+    "connection",
+    "keep-alive",
+    "transfer-encoding",
+    "upgrade",
+    "origin",
+    "referer",
+    "cookie",
+    "x-forwarded-for",
+    "x-forwarded-host",
+    "x-forwarded-proto",
+  ]);
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (!skipHeaders.has(k.toLowerCase()) && v !== undefined) {
+      headers[k] = v;
+    }
+  }
+  headers.host = SUPABASE_ORIGIN.host;
+
+  const proxyReq = https.request(
+    {
+      hostname: SUPABASE_ORIGIN.hostname,
+      port: SUPABASE_ORIGIN.port || 443,
+      path: sbPath,
+      method: req.method,
+      headers,
+      timeout: 25000,
+    },
+    (proxyRes) => {
+      const resHeaders = {};
+      for (const [k, v] of Object.entries(proxyRes.headers)) {
+        const lk = k.toLowerCase();
+        if (lk === "set-cookie" || lk === "connection" || lk === "keep-alive" || lk === "transfer-encoding") {
+          continue;
+        }
+        if (v !== undefined) resHeaders[k] = v;
+      }
+      res.writeHead(proxyRes.statusCode || 502, resHeaders);
+      proxyRes.pipe(res);
+    }
+  );
+
+  proxyReq.on("timeout", () => {
+    proxyReq.destroy(new Error("Upstream timeout"));
+  });
+
+  proxyReq.on("error", (err) => {
+    console.error("Supabase HTTP proxy error:", err && err.message ? err.message : err);
+    if (!res.headersSent) {
+      res.status(502).json({ error: "Upstream unavailable" });
+    } else if (!res.writableEnded) {
+      res.end();
+    }
+  });
+
+  req.pipe(proxyReq);
+}
+
 const server = http.createServer(async (req, res) => {
   enhanceResponse(res);
-  const parsedUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  const pathname = decodeURIComponent(parsedUrl.pathname);
+  let parsedUrl;
+  let pathname;
+  try {
+    parsedUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    pathname = decodeURIComponent(parsedUrl.pathname);
+  } catch (e) {
+    res.status(400).end("Bad Request");
+    return;
+  }
+
+  if (pathname.startsWith("/sb/")) {
+    proxySupabaseHttp(req, res, parsedUrl);
+    return;
+  }
+
+  if (pathname === "/vendor/supabase.js") {
+    fs.stat(SUPABASE_BUNDLE_PATH, (err, stats) => {
+      if (err || !stats.isFile()) {
+        res.status(404).end("Not found");
+        return;
+      }
+      loadStaticEntry(SUPABASE_BUNDLE_PATH, stats, ".js", (loadErr, entry) => {
+        if (loadErr || !entry) {
+          if (!res.headersSent) res.status(500).end("Read error");
+          return;
+        }
+        serveStaticEntry(req, res, entry, "public, max-age=86400");
+      });
+    });
+    return;
+  }
 
   if (apiHandlers[pathname]) {
     req.query = Object.fromEntries(parsedUrl.searchParams.entries());
     req.body = await readBody(req);
+    req._hasSbProxy = true;
     try {
       await apiHandlers[pathname](req, res);
     } catch (err) {
@@ -156,8 +294,9 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  let filePath = path.join(PUBLIC_DIR, pathname === "/" ? "index.html" : pathname);
-  if (!filePath.startsWith(PUBLIC_DIR)) {
+  const relativePath = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  const filePath = path.resolve(PUBLIC_DIR, relativePath);
+  if (filePath !== PUBLIC_DIR && !filePath.startsWith(PUBLIC_DIR + path.sep)) {
     res.status(403).end("Forbidden");
     return;
   }
@@ -200,6 +339,73 @@ const server = http.createServer(async (req, res) => {
       if (!res.headersSent) res.status(500).end("Read error");
     });
     stream.pipe(res);
+  });
+});
+
+server.on("upgrade", (req, clientSocket, head) => {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  } catch (e) {
+    clientSocket.destroy();
+    return;
+  }
+
+  if (!parsedUrl.pathname.startsWith("/sb/realtime/v1/")) {
+    clientSocket.destroy();
+    return;
+  }
+
+  const upstreamPath = parsedUrl.pathname.slice(3) + (parsedUrl.search || "");
+  if (!isAllowedSupabasePath(parsedUrl.pathname.slice(3))) {
+    clientSocket.destroy();
+    return;
+  }
+
+  const upstream = tls.connect(
+    {
+      host: SUPABASE_ORIGIN.hostname,
+      port: Number(SUPABASE_ORIGIN.port) || 443,
+      servername: SUPABASE_ORIGIN.hostname,
+    },
+    () => {
+      const lines = [`GET ${upstreamPath} HTTP/1.1`];
+      lines.push(`Host: ${SUPABASE_ORIGIN.host}`);
+      lines.push(`Origin: ${SUPABASE_ORIGIN.origin}`);
+      const passHeaders = [
+        "upgrade",
+        "connection",
+        "sec-websocket-key",
+        "sec-websocket-version",
+        "sec-websocket-protocol",
+        "sec-websocket-extensions",
+        "user-agent",
+      ];
+      for (const h of passHeaders) {
+        if (req.headers[h]) {
+          lines.push(`${h}: ${req.headers[h]}`);
+        }
+      }
+      lines.push("\r\n");
+      upstream.write(lines.join("\r\n"));
+      if (head && head.length) upstream.write(head);
+      upstream.pipe(clientSocket);
+      clientSocket.pipe(upstream);
+    }
+  );
+
+  upstream.on("error", (err) => {
+    console.error("Supabase WS proxy error:", err && err.message ? err.message : err);
+    try { clientSocket.destroy(); } catch (e) {}
+  });
+  clientSocket.on("error", () => {
+    try { upstream.destroy(); } catch (e) {}
+  });
+  clientSocket.on("close", () => {
+    try { upstream.destroy(); } catch (e) {}
+  });
+  upstream.on("close", () => {
+    try { clientSocket.destroy(); } catch (e) {}
   });
 });
 

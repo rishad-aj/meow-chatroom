@@ -6153,13 +6153,26 @@ function handleMessage(m) {
   }
 }
 
-const SB_URL = "https://yvqndfyiwkegxkeolvoh.supabase.co";
-const SB_KEY = "sb_publishable_AVPKoEterodpUPjlLCn3RA_d6q3ZJNn";
+let SB_URL = (typeof window !== "undefined" && window.__SB_API_URL) ||
+  (typeof window !== "undefined" && window.location && /^https?:$/i.test(window.location.protocol)
+    ? window.location.origin + "/sb"
+    : "https://yvqndfyiwkegxkeolvoh.supabase.co");
+let SB_KEY = (typeof window !== "undefined" && window.__SB_KEY) || "sb_publishable_AVPKoEterodpUPjlLCn3RA_d6q3ZJNn";
 const SB_H = { apikey: SB_KEY, Authorization: "Bearer " + SB_KEY, "Content-Type": "application/json", Prefer: "return=minimal" };
-async function sbInsert(row) { try { await fetch(SB_URL + "/rest/v1/messages", { method: "POST", headers: SB_H, body: JSON.stringify(row) }); } catch (e) {} }
-async function sbDeleteBy(ts, sender) { try { await fetch(SB_URL + "/rest/v1/messages?ts=eq." + encodeURIComponent(ts) + "&sender=eq." + encodeURIComponent(sender), { method: "DELETE", headers: SB_H }); } catch (e) {} }
-async function sbPatchText(ts, sender, text) { try { await fetch(SB_URL + "/rest/v1/messages?ts=eq." + encodeURIComponent(ts) + "&sender=eq." + encodeURIComponent(sender), { method: "PATCH", headers: SB_H, body: JSON.stringify({ text }) }); } catch (e) {} }
-async function sbSetFlag(ts, sender, flagged) { try { await fetch(SB_URL + "/rest/v1/messages?ts=eq." + encodeURIComponent(ts) + "&sender=eq." + encodeURIComponent(sender), { method: "PATCH", headers: SB_H, body: JSON.stringify({ flagged }) }); } catch (e) {} }
+const sbReadyP = (typeof window !== "undefined" && window.__sbConfigReady)
+  ? window.__sbConfigReady.then(() => {
+      if (window.__SB_API_URL) SB_URL = window.__SB_API_URL;
+      if (window.__SB_KEY) {
+        SB_KEY = window.__SB_KEY;
+        SB_H.apikey = SB_KEY;
+        SB_H.Authorization = "Bearer " + SB_KEY;
+      }
+    }).catch(() => {})
+  : Promise.resolve();
+async function sbInsert(row) { try { await sbReadyP; await fetch(SB_URL + "/rest/v1/messages", { method: "POST", headers: SB_H, body: JSON.stringify(row) }); } catch (e) {} }
+async function sbDeleteBy(ts, sender) { try { await sbReadyP; await fetch(SB_URL + "/rest/v1/messages?ts=eq." + encodeURIComponent(ts) + "&sender=eq." + encodeURIComponent(sender), { method: "DELETE", headers: SB_H }); } catch (e) {} }
+async function sbPatchText(ts, sender, text) { try { await sbReadyP; await fetch(SB_URL + "/rest/v1/messages?ts=eq." + encodeURIComponent(ts) + "&sender=eq." + encodeURIComponent(sender), { method: "PATCH", headers: SB_H, body: JSON.stringify({ text }) }); } catch (e) {} }
+async function sbSetFlag(ts, sender, flagged) { try { await sbReadyP; await fetch(SB_URL + "/rest/v1/messages?ts=eq." + encodeURIComponent(ts) + "&sender=eq." + encodeURIComponent(sender), { method: "PATCH", headers: SB_H, body: JSON.stringify({ flagged }) }); } catch (e) {} }
 async function sbRenameMyRows(oldName, newName) {
   // Own rows are recognised by the sent-timestamp ledger, plus anything the
   // chat is currently rendering as ours (covers messages sent before the
@@ -6656,9 +6669,11 @@ const HISTORY_SEL = "id,ts,sender,type,text,url,dur,size,reply_to,flagged";
 // scrollback early.
 const SB_ROOM_ONLY = "type=not.like.dm.*";
 async function sbFetchRows(url) {
-  let r = await fetch(url, { headers: SB_H }).then(r => r.json()).catch(() => null);
+  await sbReadyP;
+  const resolvedUrl = url.replace("https://yvqndfyiwkegxkeolvoh.supabase.co", SB_URL);
+  let r = await fetch(resolvedUrl, { headers: SB_H }).then(r => r.json()).catch(() => null);
   if (!Array.isArray(r)) {
-    r = await fetch(url.replace(HISTORY_SEL, "id,ts,sender,type,text,url,dur,size,reply_to"), { headers: SB_H }).then(r => r.json()).catch(() => null);
+    r = await fetch(resolvedUrl.replace(HISTORY_SEL, "id,ts,sender,type,text,url,dur,size,reply_to"), { headers: SB_H }).then(r => r.json()).catch(() => null);
   }
   return Array.isArray(r) ? r : [];
 }
@@ -8600,7 +8615,8 @@ function buildInstallBody() {
     installBody.appendChild(stepNum(1, "Click the <b>install icon</b> in the address bar (or <b>⋮</b> menu → <b>Install Chat Room</b>)."));
   }
 }
-installItem.addEventListener("click", () => {
+const installItem = document.getElementById("installItem");
+if (installItem) installItem.addEventListener("click", () => {
   menuPop.classList.add("hide");
   if (deferredPrompt) {
     const p = deferredPrompt;
