@@ -36,8 +36,10 @@ function verifyPassword(pass, want) {
   if (trimmed.startsWith("scrypt$")) {
     const parts = trimmed.split("$");
     if (parts.length !== 3 || !parts[1] || !parts[2]) return false;
+    if (!/^[a-f0-9]+$/i.test(parts[2]) || parts[2].length % 2 !== 0) return false;
     try {
       const expected = Buffer.from(parts[2], "hex");
+      if (expected.length < 16) return false;
       const derived = crypto.scryptSync(pass, parts[1], expected.length);
       return expected.length === derived.length && crypto.timingSafeEqual(expected, derived);
     } catch (e) {

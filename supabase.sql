@@ -31,13 +31,25 @@ create table if not exists public.room_meta (
   value jsonb
 );
 
+-- 2b) protected nickname accounts table (required for password-protected accounts)
+create table if not exists public.accounts (
+  username text primary key,
+  display text not null,
+  pass_hash text not null,
+  legacy boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
 -- 3) open access (public chat: anyone can read/write; tighten later if you want)
 alter table public.messages enable row level security;
 alter table public.room_meta enable row level security;
+alter table public.accounts enable row level security;
 drop policy if exists "public all messages" on public.messages;
 create policy "public all messages" on public.messages for all using (true) with check (true);
 drop policy if exists "public all room_meta" on public.room_meta;
 create policy "public all room_meta" on public.room_meta for all using (true) with check (true);
+drop policy if exists "public all accounts" on public.accounts;
+create policy "public all accounts" on public.accounts for all using (true) with check (true);
 
 -- 4) storage bucket for uploads (photos, voice notes, avatars, group icon)
 insert into storage.buckets (id, name, public)

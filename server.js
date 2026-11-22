@@ -49,9 +49,10 @@ const MIME_TYPES = {
   ".webp": "image/webp",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
 };
 
-const COMPRESSIBLE_EXTS = new Set([".html", ".js", ".mjs", ".css", ".json", ".svg"]);
+const COMPRESSIBLE_EXTS = new Set([".html", ".js", ".mjs", ".css", ".json", ".svg", ".webmanifest"]);
 const staticCache = new Map();
 
 function loadStaticEntry(filePath, stats, ext, cb) {
@@ -137,7 +138,7 @@ function enhanceResponse(res) {
 }
 
 function readBody(req) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
       resolve(undefined);
       return;
@@ -146,18 +147,20 @@ function readBody(req) {
     let total = 0;
     let exceeded = false;
     req.on("data", (chunk) => {
+      if (exceeded) return;
       total += chunk.length;
       if (total > MAX_BODY_BYTES) {
         exceeded = true;
+        chunks.length = 0;
+        const err = new Error("Payload too large");
+        err.statusCode = 413;
+        reject(err);
         return;
       }
       chunks.push(chunk);
     });
     req.on("end", () => {
-      if (exceeded) {
-        resolve({});
-        return;
-      }
+      if (exceeded) return;
       const raw = Buffer.concat(chunks).toString("utf8");
       if (!raw) {
         resolve({});
@@ -169,21 +172,37 @@ function readBody(req) {
         resolve(raw);
       }
     });
-    req.on("error", () => resolve({}));
+    req.on("error", () => {
+      if (!exceeded) resolve({});
+    });
   });
 }
 
 function isAllowedSupabasePath(sbPath) {
-  if (!sbPath || sbPath.includes("..") || sbPath.includes("\\")) return false;
-  return ALLOWED_SB_PREFIXES.some((prefix) => sbPath.startsWith(prefix));
+  if (!sbPath || typeof sbPath !== "string") return false;
+  if (/[\r\n\0\\]/.test(sbPath)) return false;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(sbPath);
+  } catch (e) {
+    return false;
+  }
+  if (/[\r\n\0\\]/.test(decoded)) return false;
+  if (sbPath.includes("..") || decoded.includes("..")) return false;
+  return ALLOWED_SB_PREFIXES.some((prefix) => sbPath.startsWith(prefix) && decoded.startsWith(prefix));
 }
 
 function proxySupabaseHttp(req, res, parsedUrl) {
-  const sbPath = parsedUrl.pathname.slice(3) + (parsedUrl.search || "");
-  if (!isAllowedSupabasePath(parsedUrl.pathname.slice(3))) {
+  if (!parsedUrl.pathname.startsWith("/sb/")) {
     res.status(403).json({ error: "Forbidden proxy path" });
     return;
   }
+  const rawSbPath = parsedUrl.pathname.slice(3);
+  if (!isAllowedSupabasePath(rawSbPath) || /[\r\n\0]/.test(parsedUrl.search || "")) {
+    res.status(403).json({ error: "Forbidden proxy path" });
+    return;
+  }
+  const sbPath = rawSbPath + (parsedUrl.search || "");
 
   const headers = {};
   const skipHeaders = new Set([
@@ -242,6 +261,15 @@ function proxySupabaseHttp(req, res, parsedUrl) {
     }
   });
 
+  req.on("aborted", () => {
+    try { proxyReq.destroy(); } catch (e) {}
+  });
+  res.on("close", () => {
+    if (!res.writableEnded) {
+      try { proxyReq.destroy(); } catch (e) {}
+    }
+  });
+
   req.pipe(proxyReq);
 }
 
@@ -250,14 +278,14 @@ const server = http.createServer(async (req, res) => {
   let parsedUrl;
   let pathname;
   try {
-    parsedUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    parsedUrl = new URL(req.url || "/", "http://localhost");
     pathname = decodeURIComponent(parsedUrl.pathname);
   } catch (e) {
     res.status(400).end("Bad Request");
     return;
   }
 
-  if (pathname.startsWith("/sb/")) {
+  if (pathname.startsWith("/sb/") || parsedUrl.pathname.startsWith("/sb/")) {
     proxySupabaseHttp(req, res, parsedUrl);
     return;
   }
@@ -279,9 +307,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (apiHandlers[pathname]) {
+  if (Object.prototype.hasOwnProperty.call(apiHandlers, pathname)) {
     req.query = Object.fromEntries(parsedUrl.searchParams.entries());
-    req.body = await readBody(req);
+    try {
+      req.body = await readBody(req);
+    } catch (bodyErr) {
+      res.status((bodyErr && bodyErr.statusCode) || 400).json({ error: "Payload too large" });
+      return;
+    }
     req._hasSbProxy = true;
     try {
       await apiHandlers[pathname](req, res);
@@ -294,6 +327,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname.startsWith("/api/")) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
   const relativePath = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
   const filePath = path.resolve(PUBLIC_DIR, relativePath);
   if (filePath !== PUBLIC_DIR && !filePath.startsWith(PUBLIC_DIR + path.sep)) {
@@ -303,6 +341,10 @@ const server = http.createServer(async (req, res) => {
 
   fs.stat(filePath, (err, stats) => {
     if (err || !stats.isFile()) {
+      if (path.extname(pathname)) {
+        res.status(404).end("Not found");
+        return;
+      }
       const indexFile = path.join(PUBLIC_DIR, "index.html");
       fs.stat(indexFile, (idxStatErr, idxStats) => {
         if (idxStatErr || !idxStats.isFile()) {
@@ -345,7 +387,7 @@ const server = http.createServer(async (req, res) => {
 server.on("upgrade", (req, clientSocket, head) => {
   let parsedUrl;
   try {
-    parsedUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    parsedUrl = new URL(req.url || "/", "http://localhost");
   } catch (e) {
     clientSocket.destroy();
     return;
@@ -356,11 +398,13 @@ server.on("upgrade", (req, clientSocket, head) => {
     return;
   }
 
-  const upstreamPath = parsedUrl.pathname.slice(3) + (parsedUrl.search || "");
-  if (!isAllowedSupabasePath(parsedUrl.pathname.slice(3))) {
+  const rawSbPath = parsedUrl.pathname.slice(3);
+  const search = parsedUrl.search || "";
+  if (!isAllowedSupabasePath(rawSbPath) || /[\r\n\0]/.test(search)) {
     clientSocket.destroy();
     return;
   }
+  const upstreamPath = rawSbPath + search;
 
   const upstream = tls.connect(
     {
@@ -382,8 +426,9 @@ server.on("upgrade", (req, clientSocket, head) => {
         "user-agent",
       ];
       for (const h of passHeaders) {
-        if (req.headers[h]) {
-          lines.push(`${h}: ${req.headers[h]}`);
+        const val = req.headers[h];
+        if (val && !/[\r\n]/.test(String(val))) {
+          lines.push(`${h}: ${val}`);
         }
       }
       lines.push("\r\n");

@@ -8,6 +8,10 @@ module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") { res.status(200).end(); return; }
+  if (req.method !== "GET" && req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
 
   var texts = [];
   var target = "en";
@@ -92,7 +96,7 @@ module.exports = async function handler(req, res) {
   async function viaMyMemory(t, tg) {
     if (!t.trim()) return "";
     try {
-      var mmTg = tg === "zh-CN" ? "zh-CN" : baseLang(tg);
+      var mmTg = (tg === "zh-CN" || tg === "zh-TW") ? tg : baseLang(tg);
       var u = "https://api.mymemory.translated.net/get?q=" + encodeURIComponent(t.slice(0, 450)) + "&langpair=autodetect%7C" + encodeURIComponent(mmTg);
       var ctrl = new AbortController();
       var timer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, 7000);
@@ -129,11 +133,11 @@ module.exports = async function handler(req, res) {
     var m = await viaMyMemory(trimmed, target);
     if (m && m.trim()) {
       var mSame = normCompare(m) === normCompare(trimmed);
-      return { text: m.trim(), sameLang: mSame };
+      if (!mSame) return { text: m.trim(), sameLang: false };
     }
 
     if (g && g.text) {
-      return { text: g.text, sameLang: normCompare(g.text) === normCompare(trimmed) };
+      return { text: g.text, sameLang: !!(g.srcLang && baseLang(g.srcLang) === baseLang(target)) };
     }
     return { text: trimmed, sameLang: false };
   }
