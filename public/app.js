@@ -665,13 +665,6 @@ unreadChipBtn.addEventListener("click", () => {
    Nothing private ever touches the room's history store: private messages live
    only in the server's durable DM region and never in the public history. */
 const dmScrollEl = document.getElementById("dmScrollCtn");
-/* The admin's read-only monitor screen (see "admin: private chats in the chat
-   list"). Declared up here with the other screen elements because the list pass
-   that decides which pane is showing runs during module evaluation. */
-const monitorScreen = document.getElementById("monitorScreen");
-const monitorBarEl = document.getElementById("monitorBarEl");
-const monitorScrollEl = document.getElementById("monitorScrollCtn");
-const monitorMessagesEl = document.getElementById("monitorMessagesEl");
 
 /* ---------- floating date indicator (Telegram/WhatsApp style) ----------
    Reuses the existing day-divider data/logic (dataset.ts + fmtDatePill, the
@@ -690,8 +683,7 @@ let stickyHideT = null;
 let stickyRaf = 0;
 let stickyLastTop = -1;
 function stickyActive() {
-  if (scrollCtnEl === monitorScrollEl) return { sc: monitorScrollEl, list: monitorMessagesEl };
-  if (scrollCtnEl === dmScrollEl) return { sc: dmScrollEl, list: document.getElementById("dmMessagesEl") };
+  if (scrollCtnEl === dmScrollEl) return { sc: dmScrollEl, list: dmMessagesEl };
   return { sc: roomScrollCtn, list: roomMessagesEl };
 }
 function stickyHideNow() {
@@ -715,10 +707,6 @@ function stickyPlace() {
   if (stickyPinnedEl && !stickyPinnedEl.classList.contains("hide") && sc === roomScrollCtn) {
     const pr = stickyPinnedEl.getBoundingClientRect();
     if (pr.height > 0) topEdge = Math.max(topEdge, pr.bottom - appRect.top);
-  }
-  if (sc === monitorScrollEl && monitorBarEl) {
-    const mr = monitorBarEl.getBoundingClientRect();
-    if (mr.height > 0) topEdge = Math.max(topEdge, mr.bottom - appRect.top);
   }
   stickyWrap.style.top = Math.round(topEdge + 8) + "px";
   stickyWrap.style.left = Math.round(scRect.left - appRect.left) + "px";
@@ -765,7 +753,7 @@ function stickyOnScroll() {
   if (stickyRaf) return;
   stickyRaf = requestAnimationFrame(() => { stickyRaf = 0; stickyShow(); });
 }
-for (const scroller of [roomScrollCtn, dmScrollEl, monitorScrollEl]) {
+for (const scroller of [roomScrollCtn, dmScrollEl]) {
   scroller.addEventListener("scroll", stickyOnScroll, { passive: true });
 }
 window.addEventListener("resize", () => {
@@ -998,16 +986,6 @@ let peopleOpen = false;
 let peopleTimer = null;
 let onlineNames = new Set();
 let dmThreads = [];
-// Admin-only: every private conversation between *other* people, refreshed with
-// the people list and rendered in the chat list's "All private chats" section.
-let adminDmThreads = [];
-// The other people's conversation the admin's read-only monitor screen is
-// showing, if any, plus the messages it last rendered.
-let monitorPair = null;
-let monitorMsgs = [];
-// When the admin is "viewing as" somebody (the eye icon on a user's row), the
-// chat list shows that person's private conversations instead of the admin's.
-let viewAs = "";
 let dmPeerRead = 0;                       // the other side's read mark in the open chat
 let dmReadSentAt = 0;
 let roomHistoryStale = false;
@@ -1052,26 +1030,6 @@ function applyHeader() {
     onlineSub.textContent = onlineNames.has(peer) ? "online" : "offline";
     iconBtn.classList.add("hide");
     titleEditBtn.classList.add("hide");
-    // Admin-only: the eye beside the peer's name puts the admin in that
-    // person's shoes (see openViewAs).
-    // view-as eye removed per privacy terms
-  } else if (convo.mode === "monitor") {
-    // The admin's read-only window into somebody else's conversation: there is
-    // no profile to show and nothing of the admin's own to edit.
-    const p = monitorPair;
-    chatTitle.textContent = p ? p.a + " \u00b7 " + p.b : "Private chat";
-    avatar.style.background = "";
-    avatar.style.backgroundImage = "";
-    avatar.style.backgroundSize = "";
-    avatar.style.backgroundPosition = "";
-    avatar.style.backgroundRepeat = "";
-    avatar.style.color = "";
-    avatar.classList.toggle("hasPfp", false);
-    avatarLetter.textContent = p ? ((p.a.charAt(0) || "?") + (p.b.charAt(0) || "?")).toUpperCase() : "\u2026";
-    onlineSub.textContent = "private \u00b7 moderating";
-    iconBtn.classList.add("hide");
-    titleEditBtn.classList.add("hide");
-    // view-as eye removed per privacy terms
   } else {
     avatar.style.background = "";
     applyIcon(currentIconUrl);
@@ -1082,7 +1040,6 @@ function applyHeader() {
       iconBtn.classList.remove("hide");
       titleEditBtn.classList.remove("hide");
     }
-    // view-as eye removed per privacy terms
   }
   syncBackIcon();
 }
@@ -1279,7 +1236,6 @@ function personRow(peer, info) {
   if (unread) bottom.appendChild(el("span", "pBadge", unread > 99 ? "99+" : String(unread)));
   main.appendChild(bottom);
   row.appendChild(main);
-  // view-as eye removed per privacy terms
   const del = el("button", "pDel");
   del.type = "button";
   del.title = "Delete conversation";
@@ -1349,35 +1305,6 @@ function roomLastMsg() {
   return { sender, text, ts: Number(n.dataset.ts) || 0 };
 }
 
-/* A row for somebody else's private conversation, shown to the admin only. It
-   is not a conversation the admin takes part in, so tapping it opens the
-   read-only monitor screen (openMonitorThread) rather than a normal private
-   chat, and the moderation actions live there. */
-function adminThreadRow(t) {
-  const row = el("div", "pRow adminRow");
-  row.dataset.pair = t.a + "|" + t.b;
-  if (convo.mode === "monitor" && monitorPair && monitorPair.a === t.a && monitorPair.b === t.b) row.classList.add("active");
-  const av = el("div", "pAvatar adminAv");
-  av.textContent = ((t.a.charAt(0) || "?") + (t.b.charAt(0) || "?")).toUpperCase();
-  row.appendChild(av);
-  const main = el("div", "pMain");
-  const top = el("div", "pTop");
-  top.appendChild(el("span", "pName", t.a + " \u00b7 " + t.b));
-  top.appendChild(el("span", "pMonitorTag", "private"));
-  if (t.ts) {
-    const meta = el("span", "pMeta");
-    meta.appendChild(el("span", "pTime", fmtTimeShort(t.ts)));
-    top.appendChild(meta);
-  }
-  main.appendChild(top);
-  const bottom = el("div", "pBottom");
-  bottom.appendChild(buildPreviewEl(t.preview && t.from ? t.from : "", t.preview || "No messages yet"));
-  main.appendChild(bottom);
-  row.appendChild(main);
-  row.addEventListener("click", () => openMonitorThread({ a: t.a, b: t.b }));
-  return row;
-}
-
 function sanitizeFilter() {
   if (!filterUserTyped && peopleSearchInput.value) peopleSearchInput.value = "";
 }
@@ -1400,11 +1327,6 @@ function renderPeopleList(animateTabs) {
   // The admin also gets to see who is waiting to be verified - the only place
   // verification can be granted without them having to speak first.
   const pending = isAdmin() ? [...names].filter((n) => onlineNames.has(n) && !canDm(n)).filter(match).sort((a, b) => a.localeCompare(b)) : [];
-  // Every *other* pair's private conversation, so the admin can read and
-  // moderate it from the chat list itself instead of only from the admin panel.
-  const monitored = isAdmin()
-    ? adminDmThreads.filter((t) => t && t.a && t.b && t.a !== myName && t.b !== myName && (match(t.a) || match(t.b)))
-    : [];
 
   // Update live folder notification badges (unread notification counts only).
   const allowed = dmAllowed();
@@ -1416,15 +1338,6 @@ function renderPeopleList(animateTabs) {
   }
 
   const frag = document.createDocumentFragment();
-  // The admin's "view as" session replaces the whole list with that person's
-  // conversations, so the eye icon really does put the admin in their shoes.
-  if (isAdmin() && viewAs) {
-    peopleListEl.textContent = "";
-    peopleTitleEl.textContent = "Chats";
-    peopleSubEl.textContent = "Viewing as " + viewAs;
-    renderViewAsList();
-    return;
-  }
   if (isDesk()) {
     peopleTitleEl.textContent = "Chats";
     peopleSubEl.textContent = onlineCount === 1 ? "1 online" : onlineCount + " online";
@@ -1477,11 +1390,7 @@ function renderPeopleList(animateTabs) {
     frag.appendChild(el("div", "pSection", "Not verified"));
     for (const peer of pending) frag.appendChild(pendingRow(peer));
   }
-  if (monitored.length) {
-    frag.appendChild(el("div", "pSection", "All private chats"));
-    for (const t of monitored) frag.appendChild(adminThreadRow(t));
-  }
-  if (!roomMatches && !chats.length && !fresh.length && !pending.length && !monitored.length) {
+  if (!roomMatches && !chats.length && !fresh.length && !pending.length) {
     frag.appendChild(el("div", "pEmpty", q ? "No chats match that search" : "No one else is here right now.\nPeople appear the moment they join."));
   }
   peopleListEl.replaceChildren(frag);
@@ -1541,7 +1450,6 @@ async function refreshPeople() {
     } catch (e) {}
     refreshAvatarDots();
     syncPfpsFromServer(false);
-    await refreshAdminDmThreads();
     refreshListView();
     if (convo.mode === "dm") applyHeader();
   } finally {
@@ -1560,7 +1468,6 @@ function openPeople() {
   setPeopleScreenVisible(true);
   roomScrollCtn.classList.add("hide");
   dmScrollEl.classList.add("hide");
-  monitorScreen.classList.add("hide");
   composeBar.classList.add("hide");
   unreadChipBtn.classList.add("hide");
   scrollDownBtn.classList.add("hide");
@@ -1584,7 +1491,6 @@ async function showRoom() {
   scrollCtnEl = roomScrollCtn;
   setPeopleScreenVisible(false);
   dmScrollEl.classList.add("hide");
-  monitorScreen.classList.add("hide");
   roomScrollCtn.classList.remove("hide");
   composeBar.classList.remove("hide");
   syncComposeH();
@@ -1669,7 +1575,6 @@ async function openDm(name) {
   scrollCtnEl = dmScrollEl;
   setPeopleScreenVisible(false);
   roomScrollCtn.classList.add("hide");
-  monitorScreen.classList.add("hide");
   dmScrollEl.classList.remove("hide");
   composeBar.classList.remove("hide");
   unreadChipBtn.classList.add("hide");
@@ -1970,7 +1875,6 @@ function syncBackIcon() {
   backBtn.classList.toggle("cross", convo.mode === "people");
 }
 backBtn.addEventListener("click", () => {
-  if (convo.mode === "monitor") { closeMonitor(); return; }
   if (convo.mode === "dm") { openPeople(); return; }
   if (convo.mode === "people") { showRoom(); return; }
   openPeople();
@@ -3083,7 +2987,7 @@ function removeTogFor(el) {
     if (tog) tog.remove();
     bubble.classList.remove("has-tog");
   }
-  // A plain element (no bubble: the admin's monitor cards) has its toggle as a
+  // A plain element outside a bubble (e.g. archive cards) has its toggle as a
   // sibling, so it is cleaned up here - otherwise a stale "Translating…" would
   // sit under the text forever.
   const sib = el.nextElementSibling;
@@ -3273,12 +3177,11 @@ function elInViewport(el) {
   return r.width > 0 && r.height > 0 && r.bottom > c.top && r.top < c.bottom;
 }
 /* Translatable text elements only (never image bubbles or deleted-message chrome). */
-const TRANS_SEL = ".btext:not(.delnoteText), .delOrigText, .asDmText, .asDelText";
+const TRANS_SEL = ".btext:not(.delnoteText), .delOrigText, .asDelText";
 /* What translation touches right now: visible incoming text bubbles in the active view. */
 function translationTargets() {
   const roots = [];
   if (convo.mode === "dm") roots.push(dmMessagesEl);
-  else if (convo.mode === "monitor") roots.push(monitorBody);
   else if (convo.mode === "room") roots.push(roomMessagesEl);
   if (typeof adminSide !== "undefined" && adminSide && !adminSide.classList.contains("hide")) roots.push(adminSide);
   const out = [];
@@ -3630,7 +3533,6 @@ function scrollToMsgId(ref) {
 }
 
 function wireReply(wrap, bubble, m) {
-  if (convo.mode === "monitor") return;   // no swipe-to-reply in the admin's monitor
   let startX = 0, startY = 0, swiping = false, claimed = false, dx = 0;
   wrap.addEventListener("touchstart", (e) => {
     if (selectionMode) return;
@@ -3820,7 +3722,6 @@ function openAdminPanel() {
   if (!asName.value.trim()) asName.value = myName;
   loadFakeUsers();
   loadDeletedMessages();
-  loadAdminDmThreads();
 }
 adminItem.addEventListener("click", () => {
   menuPop.classList.add("hide");
@@ -3946,423 +3847,6 @@ asDelClearBtn.addEventListener("click", async () => {
   asDelClearBtn.textContent = "Clear archive";
   try { await socket.rpc.clearDeleted(""); toast("Deleted-message archive erased"); } catch (e) {}
   loadDeletedMessages();
-});
-
-/* ---------- admin: private-chat moderation ----------
-   Private chats are normally invisible to everyone but the two participants;
-   this panel is the single exception, so the admin can read a conversation and
-   act on it - remove one message, remove the whole conversation, or ban a
-   participant. The server side is gated on the admin connection alone
-   (adminDmThreads / adminDm / adminDmDeleteMsg / adminDmDeleteAll), never on
-   `mayDm`, because the admin is not a participant in the thread.
-   The server's copy of a thread is capped at DM_MSGS_MAX, so the panel merges
-   in the Supabase scrollback for the rest of the history - and mirrors every
-   removal there itself. That mirror step is essential: the server cannot reach
-   Supabase, and a row left behind would be merged straight back the next time
-   one of the pair reopened the conversation. */
-const asDmList = document.getElementById("asDmList");
-const asDmThreadCtn = document.getElementById("asDmThread");
-const asDmRefreshBtn = document.getElementById("asDmRefreshBtn");
-let asDmPair = null;
-
-async function sbAdminDmDeleteRow(a, b, ts) {
-  try {
-    const key = await dmThreadKey(a, b);
-    await fetch(SB_URL + "/rest/v1/messages?type=eq." + key + "&ts=eq." + Number(ts), { method: "DELETE", headers: SB_H });
-  } catch (e) {}
-}
-async function sbAdminDmDeleteThread(a, b) {
-  try {
-    const key = await dmThreadKey(a, b);
-    await fetch(SB_URL + "/rest/v1/messages?type=eq." + key, { method: "DELETE", headers: SB_H });
-  } catch (e) {}
-}
-
-// Two taps for anything that can't be undone (the same pattern as the archive's
-// clear button - a native confirm() would block the whole app on mobile).
-function asDmArm(btn, label, fn) {
-  let armed = false;
-  let timer = null;
-  btn.addEventListener("click", () => {
-    if (!armed) {
-      armed = true;
-      btn.textContent = "Tap again to confirm";
-      timer = setTimeout(() => { armed = false; btn.textContent = label; }, 4000);
-      return;
-    }
-    armed = false;
-    clearTimeout(timer);
-    btn.textContent = label;
-    fn();
-  });
-}
-
-function renderAdminDmList(arr) {
-  if (!asDmList) return;
-  asDmList.textContent = "";
-  if (!arr.length) {
-    asDmList.appendChild(el("div", "asHint", "No private conversations yet."));
-    return;
-  }
-  for (const t of arr) {
-    const row = el("div", "asDmThreadItem");
-    row.appendChild(el("div", "asDmPair", t.a + "  ·  " + t.b));
-    if (t.preview) row.appendChild(el("div", "asDmPrev", (t.from ? t.from + ": " : "") + t.preview));
-    row.appendChild(el("div", "asDmMeta", t.count + (t.count === 1 ? " message" : " messages") + " stored  ·  " + fmtTimeShort(t.ts)));
-    row.addEventListener("click", () => openAdminDm(t));
-    asDmList.appendChild(row);
-  }
-}
-
-async function loadAdminDmThreads() {
-  if (!asDmList || !isAdmin()) return;
-  if (!socket || socket.readyState !== 1) {
-    asDmList.textContent = "";
-    asDmList.appendChild(el("div", "asHint", "Not connected."));
-    return;
-  }
-  let arr = [];
-  try { arr = JSON.parse(await socket.rpc.adminDmThreads("")); } catch (e) { arr = []; }
-  renderAdminDmList(Array.isArray(arr) ? arr : []);
-}
-
-function adminDmContent(m) {
-  const body = el("div", "asDmMsgBody");
-  if (m.t === "img" && m.url) {
-    const im = el("img", "asDelImg");
-    im.src = m.url; im.loading = "lazy"; im.alt = "";
-    body.appendChild(im);
-    if (m.caption) body.appendChild(el("div", "asDelText", m.caption));
-  } else if (m.t === "voice" && m.url) {
-    const au = el("audio", "asDelAudio");
-    au.src = m.url; au.controls = true; au.preload = "none";
-    body.appendChild(au);
-  } else {
-    body.classList.add("asDmText");
-    body.textContent = m.text || "(empty)";
-  }
-  return body;
-}
-
-function buildAdminDmMsg(m, pair, rerender) {
-  const row = el("div", "asDmMsg");
-  const head = el("div", "asDmMsgHead");
-  head.appendChild(el("span", "asDmWho", m.from || "unknown"));
-  head.appendChild(el("span", "asDmWhen", fmtTimeShort(m.ts)));
-  const del = el("button", "", "Delete");
-  del.title = "Delete this message for both participants";
-  asDmArm(del, "Delete", () => adminDeleteDmMsg(pair, m, rerender));
-  head.appendChild(del);
-  row.appendChild(head);
-  row.appendChild(adminDmContent(m));
-  return row;
-}
-
-async function openAdminDm(t) {
-  if (!isAdmin() || !socket || socket.readyState !== 1) return;
-  if (!asDmThreadCtn) return;
-  asDmPair = { a: t.a, b: t.b };
-  const pair = asDmPair;
-  const rerender = () => { if (asDmPair && asDmPair.a === pair.a && asDmPair.b === pair.b) openAdminDm(pair); };
-  asDmThreadCtn.textContent = "";
-  asDmThreadCtn.appendChild(el("div", "asHint", "Loading conversation…"));
-  asDmThreadCtn.classList.remove("hide");
-  let msgs = [];
-  try {
-    const data = JSON.parse(await socket.rpc.adminDm(JSON.stringify({ a: t.a, b: t.b })));
-    if (data && Array.isArray(data.msgs)) msgs = data.msgs.slice();
-  } catch (e) {}
-  if (SB_DM_ON) {
-    try {
-      const extra = await sbDmFetchMsgs(t.b, t.a);
-      const seen = new Set(msgs.map((m) => Number(m.ts) || 0));
-      for (const m of extra) if (!seen.has(Number(m.ts) || 0)) msgs.push(m);
-    } catch (e) {}
-  }
-  if (asDmPair.a !== t.a || asDmPair.b !== t.b) return;
-  msgs.sort((x, y) => (Number(x.ts) || 0) - (Number(y.ts) || 0));
-
-  asDmThreadCtn.textContent = "";
-  const head = el("div", "asDmThreadHead");
-  head.appendChild(el("div", "asDmPair", t.a + "  ·  " + t.b));
-  const closeB = el("button", "", "Close");
-  closeB.addEventListener("click", () => {
-    asDmThreadCtn.classList.add("hide");
-    asDmThreadCtn.textContent = "";
-    asDmPair = null;
-  });
-  head.appendChild(closeB);
-  asDmThreadCtn.appendChild(head);
-
-  const acts = el("div", "asDmActs");
-  const delConv = el("button", "dangerBtn", "Delete conversation");
-  asDmArm(delConv, "Delete conversation", () => adminDeleteDmThread(pair, () => {
-    asDmThreadCtn.classList.add("hide");
-    asDmThreadCtn.textContent = "";
-    asDmPair = null;
-  }));
-  acts.appendChild(delConv);
-  for (const who of [t.a, t.b]) {
-    const banB = el("button", "dangerBtn", "Ban " + who);
-    banB.title = "Ban " + who + " from the room";
-    banB.addEventListener("click", () => adminDmBan(who));
-    acts.appendChild(banB);
-  }
-  asDmThreadCtn.appendChild(acts);
-
-  const list = el("div", "asDmMsgs");
-  if (!msgs.length) list.appendChild(el("div", "asHint", "No stored messages in this conversation."));
-  for (const m of msgs) list.appendChild(buildAdminDmMsg(m, pair, rerender));
-  asDmThreadCtn.appendChild(list);
-  asDmThreadCtn.appendChild(el("div", "asHint", msgs.length + (msgs.length === 1 ? " message" : " messages") + " - the server's copy merged with the scrollback store."));
-}
-
-// `pair` is an {a, b} target (the admin panel and the chat-list monitor screen
-// both pass their own), so one removal path serves both views. `rerender` is the
-// view's own redraw, called once the server and the mirror have been updated.
-async function adminDeleteDmMsg(pair, m, rerender) {
-  if (!pair || !isAdmin()) return;
-  const { a, b } = pair;
-  const sid = String(m.id || "");
-  if (sid && sid.indexOf("sb-") !== 0) {
-    try { await socket.rpc.adminDmDeleteMsg(JSON.stringify({ a, b, id: sid })); } catch (e) {}
-  }
-  await sbAdminDmDeleteRow(a, b, m.ts);
-  toast("Message deleted for both participants");
-  if (rerender) rerender();
-  loadAdminDmThreads();
-}
-
-async function adminDeleteDmThread(pair, onDone) {
-  if (!pair || !isAdmin()) return;
-  const { a, b } = pair;
-  try { await socket.rpc.adminDmDeleteAll(JSON.stringify({ a, b })); } catch (e) {}
-  await sbAdminDmDeleteThread(a, b);
-  toast("Conversation deleted for both participants");
-  if (onDone) onDone();
-  loadAdminDmThreads();
-  refreshAdminDmThreads().then(refreshListView);
-}
-
-async function adminDmBan(name) {
-  if (!isAdmin() || !socket || socket.readyState !== 1) return;
-  try {
-    const r = await socket.rpc.banUser(JSON.stringify({ name }));
-    toast(r === "ok" ? name + " banned" : String(r || "Failed to ban"));
-  } catch (e) {}
-}
-
-/* ---------- admin: private chats in the chat list ----------
-   The same moderation the admin panel offers, surfaced in the chat list itself.
-   `renderPeopleList` grows an admin-only "All private chats" section built from
-   `adminDmThreads`, the eye icon on a person's row switches the list into that
-   person's own conversations (view as), and tapping any of those rows opens this
-   read-only monitor screen instead of a normal private chat - the admin is not a
-   participant, so there is no composer, no read receipts and no typing traffic.
-   Reads merge the Supabase scrollback exactly like the panel does, removals go
-   through the same shared helpers, and translation covers both sides of the
-   conversation (the monitor cards carry no `.msg.out`, so nothing is skipped). */
-
-async function refreshAdminDmThreads() {
-  if (!isAdmin() || !socket || socket.readyState !== 1) { adminDmThreads = []; return; }
-  try {
-    const arr = JSON.parse(await socket.rpc.adminDmThreads(""));
-    adminDmThreads = Array.isArray(arr) ? arr : [];
-  } catch (e) { adminDmThreads = []; }
-}
-
-// "View as <name>": show that person's private conversations in the chat list,
-// as if their account were signed in here (read-only). Complements the eye icon
-// on a row, and the per-participant eye buttons in the monitor bar.
-function openViewAs(name) {
-  return; // disabled per privacy terms: admins can no longer view-as users
-  if (!isAdmin() || !name || name === myName) return;
-  viewAs = String(name);
-  toast("Viewing as " + viewAs);
-  if (!isDesk()) openPeople();
-  else { renderPeopleList(); refreshAdminDmThreads().then(refreshListView); }
-}
-function exitViewAs() {
-  viewAs = "";
-  refreshListView();
-}
-
-// The list a "view as" session shows: a banner to leave it, then every private
-// conversation that person takes part in.
-function renderViewAsList() {
-  const who = viewAs;
-  const bar = el("div", "viewAsRow");
-
-  bar.appendChild(el("span", "viewAsLabel", "Viewing as " + who));
-  const exit = el("button", "viewAsExit", "Exit");
-  exit.type = "button";
-  exit.addEventListener("click", (e) => { e.stopPropagation(); exitViewAs(); });
-  bar.appendChild(exit);
-  peopleListEl.appendChild(bar);
-  const threads = adminDmThreads.filter((t) => t && (t.a === who || t.b === who));
-  peopleListEl.appendChild(el("div", "pSection", "Private chats"));
-  if (!threads.length) {
-    peopleListEl.appendChild(el("div", "pEmpty", who + " has no private conversations yet."));
-    return;
-  }
-  for (const t of threads) peopleListEl.appendChild(adminThreadRow(t));
-}
-
-function monitorNameWithEye(who) {
-  const wrap = el("span", "monitorName");
-  wrap.appendChild(el("span", null, who));
-  return wrap;
-}
-
-function buildMonitorBar() {
-  const pair = monitorPair;
-  monitorBarEl.textContent = "";
-  if (!pair) return;
-  const title = el("div", "monitorTitle");
-  // An eye beside each participant's name: tap it to drop into that person's
-  // own list of private chats.
-  title.appendChild(monitorNameWithEye(pair.a));
-  title.appendChild(el("span", "monitorDot", "\u00b7"));
-  title.appendChild(monitorNameWithEye(pair.b));
-  monitorBarEl.appendChild(title);
-  const acts = el("div", "asDmActs");
-  const refreshB = el("button", "", "Refresh");
-  refreshB.addEventListener("click", () => renderMonitorThread());
-  acts.appendChild(refreshB);
-  const delConv = el("button", "dangerBtn", "Delete conversation");
-  asDmArm(delConv, "Delete conversation", () => adminDeleteDmThread(pair, closeMonitor));
-  acts.appendChild(delConv);
-  for (const who of [pair.a, pair.b]) {
-    const banB = el("button", "dangerBtn", "Ban " + who);
-    banB.title = "Ban " + who + " from the room";
-    banB.addEventListener("click", () => adminDmBan(who));
-    acts.appendChild(banB);
-  }
-  monitorBarEl.appendChild(acts);
-  const n = monitorMsgs.length;
-  monitorBarEl.appendChild(el("div", "asHint",
-    "Read-only \u00b7 " + (n ? n + (n === 1 ? " message" : " messages") : "no stored messages") +
-    " \u00b7 deleting removes a message (or the whole conversation) for both participants."));
-}
-
-async function renderMonitorThread() {
-  if (convo.mode !== "monitor" || !monitorPair) return;
-  const pair = monitorPair;
-  monitorBarEl.textContent = "";
-  monitorBarEl.appendChild(el("div", "asHint", "Loading conversation\u2026"));
-  monitorMessagesEl.textContent = "";
-  monitorMessagesEl.appendChild(el("div", "pEmpty", "Loading\u2026"));
-  let msgs = [];
-  try {
-    const data = JSON.parse(await socket.rpc.adminDm(JSON.stringify({ a: pair.a, b: pair.b })));
-    if (data && Array.isArray(data.msgs)) msgs = data.msgs.slice();
-  } catch (e) {}
-  if (SB_DM_ON) {
-    try {
-      const extra = await sbDmFetchMsgs(pair.b, pair.a);
-      const seen = new Set(msgs.map((m) => Number(m.ts) || 0));
-      for (const m of extra) if (!seen.has(Number(m.ts) || 0)) msgs.push(m);
-    } catch (e) {}
-  }
-  if (convo.mode !== "monitor" || !monitorPair || monitorPair.a !== pair.a || monitorPair.b !== pair.b) return;
-  msgs.sort((x, y) => (Number(x.ts) || 0) - (Number(y.ts) || 0));
-  monitorMsgs = msgs;
-  // A normal chat interface: the exact renderer the room and a private chat use,
-  // so the admin reads bubbles, names, avatars, replies, reactions, photos and
-  // voice notes just like everyone else. The container carries no `data-peer`,
-  // so every message renders as incoming (never as "mine").
-  msgByWrapCleanup(monitorMessagesEl);
-  monitorMessagesEl.textContent = "";
-  withMsgHost(monitorMessagesEl, () => {
-    for (const m of msgs) if (m && m.t) addMessageDom(m);
-  });
-  if (!msgs.length) monitorMessagesEl.appendChild(el("div", "pEmpty", "No messages in this conversation."));
-  updateBubbleTails();
-  scheduleDaySeps();
-  addMonitorDeleteButtons();
-  buildMonitorBar();
-  if (scrollCtnEl === monitorScrollEl) monitorScrollEl.scrollTop = monitorScrollEl.scrollHeight;
-  // Every bubble is incoming here, so translation covers both participants.
-  if (translateOn) translateViewport();
-}
-
-// A small moderator delete on each monitored bubble - the admin's only
-// per-message action. It arms on the first tap (the same two-tap safety the
-// panel and the archive use) so a stray tap cannot remove someone's message.
-function monArm(btn, onConfirm) {
-  let armed = false;
-  let timer = null;
-  btn.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!armed) {
-      armed = true;
-      btn.classList.add("armed");
-      timer = setTimeout(() => { armed = false; btn.classList.remove("armed"); }, 4000);
-      return;
-    }
-    armed = false;
-    clearTimeout(timer);
-    btn.classList.remove("armed");
-    onConfirm();
-  });
-}
-function addMonitorDeleteButtons() {
-  const pair = monitorPair;
-  if (!pair) return;
-  for (const wrap of [...monitorMessagesEl.querySelectorAll(".msg")]) {
-    const m = msgByWrap.get(wrap);
-    if (!m || !m.t) continue;
-    const row = wrap.querySelector(".tsrow") || wrap.querySelector(".bubble");
-    if (!row || row.querySelector(".monDeleteBtn")) continue;
-    const btn = el("button", "monDeleteBtn");
-    btn.type = "button";
-    btn.title = "Delete this message for both participants";
-    btn.setAttribute("aria-label", btn.title);
-    btn.innerHTML = DEL_SVG;
-    monArm(btn, () => adminDeleteDmMsg(pair, m, () => renderMonitorThread()));
-    row.appendChild(btn);
-  }
-}
-
-async function openMonitorThread(t) {
-  if (!isAdmin() || !socket || socket.readyState !== 1) return;
-  if (!t || !t.a || !t.b) return;
-  if (selectionMode) endSelection();
-  leaveDm();
-  peopleOpen = false;
-  if (!isDesk()) clearInterval(peopleTimer);
-  monitorPair = { a: t.a, b: t.b };
-  monitorMsgs = [];
-  convo = { mode: "monitor", peer: "" };
-  messagesEl = monitorMessagesEl;
-  scrollCtnEl = monitorScrollEl;
-  setPeopleScreenVisible(false);
-  roomScrollCtn.classList.add("hide");
-  dmScrollEl.classList.add("hide");
-  monitorScreen.classList.remove("hide");
-  composeBar.classList.add("hide");
-  unreadChipBtn.classList.add("hide");
-  scrollDownBtn.classList.add("hide");
-  closeEmojiPanel();
-  closeGifPanel();
-  retargetTailObserver();
-  applyHeader();
-  renderMonitorThread();
-}
-
-// Back to the list (phone) or to the room pane (desktop). The monitor is not a
-// place the admin stays in, and nothing about it outlives leaving it.
-function closeMonitor() {
-  if (convo.mode !== "monitor") return;
-  monitorPair = null;
-  monitorMsgs = [];
-  if (isDesk()) showRoom(); else openPeople();
-}
-
-if (asDmRefreshBtn) asDmRefreshBtn.addEventListener("click", () => {
-  loadAdminDmThreads();
-  if (asDmPair) openAdminDm(asDmPair);
 });
 
 const asName = document.getElementById("asName");
@@ -8944,7 +8428,6 @@ titleEditBtn.addEventListener("click", () => {
   titleModal.classList.remove("hide");
   titleInput.focus();
 });
-// view-as eye removed per privacy terms
 titleCancelBtn.addEventListener("click", () => titleModal.classList.add("hide"));
 titleOkBtn.addEventListener("click", async () => {
   const v = titleInput.value.trim().slice(0, 60);
@@ -9601,9 +9084,6 @@ function wireReactionPill(pill, m, emoji) {
     rxLpStop();
     if (pill.__rxHeld) { pill.__rxHeld = false; return; }
     if (rxWhoPill === pill) { closeReactionWho(); return; }
-    // In the admin's monitor the pill is read-only: a tap shows who reacted
-    // instead of toggling a reaction the admin could never own.
-    if (convo.mode === "monitor") { openReactionWho(pill, m, emoji); return; }
     toggleReaction(m, emoji);
   });
 }
@@ -10120,11 +9600,6 @@ function wireSelection(wrap, bubble, m) {
   wrap.dataset.flagged = m.flagged ? "1" : "0";
   const chk = el("span", "selCheck");
   wrap.appendChild(chk);
-  // The admin's read-only monitor renders real chat bubbles, but none of the
-  // participant actions apply there (the admin is not in the conversation): no
-  // select, no tap-to-react, no reply. The monitor adds its own per-message
-  // delete control (see addMonitorDeleteButtons) instead.
-  if (convo.mode === "monitor") return;
   let timer = null, sx = 0, sy = 0, fired = false, moved = false;
   const isInteract = (t) => !!(t.closest && (t.closest("button") || t.closest("a")));
   const start = (x, y, t) => {

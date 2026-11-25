@@ -696,7 +696,11 @@ body.dark .mOnlineDot { box-shadow: 0 0 0 2px #18181c; }
   text-overflow: ellipsis;
 }
 .imgBubble .senderName {
-  padding: 7px 17px 0;
+  padding: 3px 17px calc(var(--img-pad, 3px) + 3px);
+  margin: 0;
+}
+.imgBubble .senderName:has(+ .replyQuote) {
+  padding-bottom: 3px;
 }
 .btext {
   white-space: pre-wrap;
@@ -972,7 +976,22 @@ body.dark .mOnlineDot { box-shadow: 0 0 0 2px #18181c; }
 
 
 /* ---------- image bubbles ---------- */
-.bubble.imgBubble { padding: 3px; width: 100%; max-width: min(62%, 560px); }
+.bubble.imgBubble {
+  --img-pad: 3px;
+  --img-r-outer: 19px;
+  --img-r-top: calc(var(--img-r-outer) - var(--bw, 0px) - var(--img-pad));
+  --img-r-bot: calc(var(--img-r-outer) - var(--bw, 0px) - var(--img-pad));
+  padding: var(--img-pad);
+  width: 100%;
+  max-width: min(62%, 560px);
+}
+.bubble.imgBubble:has(> .senderName),
+.bubble.imgBubble:has(> .replyQuote) {
+  --img-r-top: 4px;
+}
+.bubble.imgBubble:has(> .caption) {
+  --img-r-bot: 8px;
+}
 .bubble.imgBubble.gifMsg { max-width: min(70%, 440px); }
 /* ---------- wide/desktop screens: longer bubbles (phone view is unchanged) ---------- */
 @media (min-width: 521px) {
@@ -1034,19 +1053,25 @@ body.dark .mOnlineDot { box-shadow: 0 0 0 2px #18181c; }
 .ytPlay svg { width: 21px; height: 21px; display: block; }
 /* In selection mode the player must not swallow taps - let them reach the bubble. */
 #app.selMode .ytEmbedWrap { pointer-events: none; }
-.bubble.imgBubble img {
+.bubble.imgBubble > img {
   display: block;
   width: 100%;
   height: auto;
-  border-radius: 22px;
+  border-radius: var(--img-r-top) var(--img-r-top) var(--img-r-bot) var(--img-r-bot);
 }
 /* ---------- bounded GIF playback (canvas replaces the <img>) ---------- */
-.gifWrap { position: relative; line-height: 0; contain: layout style paint; }
+.gifWrap {
+  position: relative;
+  line-height: 0;
+  contain: layout style paint;
+  overflow: hidden;
+  border-radius: var(--img-r-top) var(--img-r-top) var(--img-r-bot) var(--img-r-bot);
+}
 .bubble.imgBubble .gifCanvas {
   display: block;
   width: 100%;
   height: auto;
-  border-radius: 22px;
+  border-radius: var(--img-r-top) var(--img-r-top) var(--img-r-bot) var(--img-r-bot);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transform: translateZ(0);
@@ -1483,7 +1508,7 @@ body.dark .mOnlineDot { box-shadow: 0 0 0 2px #18181c; }
 
 .bubble.adminMsg.imgBubble,
 .bubble.verifiedMsg.imgBubble,
-.bubble.flagged.imgBubble { padding: 4px; }
+.bubble.flagged.imgBubble { --img-pad: 4px; padding: var(--img-pad); }
 
 .bubble.adminMsg::before,
 .bubble.verifiedMsg::before,
@@ -2866,80 +2891,6 @@ body.dark .asHint { color: #9aa0a8; }
 .asDelMissing { color: #8a97a3; font-style: italic; }
 .asDelImg { max-width: 100%; max-height: 160px; border-radius: 6px; object-fit: cover; align-self: flex-start; }
 .asDelAudio { width: 100%; height: 34px; }
-/* admin: private-chat moderation */
-#asDmRefreshBtn {
-  border: none;
-  border-radius: 9px;
-  padding: 7px 12px;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  color: #fff;
-  background: #4c7ca4;
-}
-#asDmRefreshBtn:hover { filter: brightness(1.08); }
-#asDmList { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
-.asDmThreadItem {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  border: 1px solid #e3eaf0;
-  border-radius: 9px;
-  padding: 7px 9px;
-  background: #fff;
-  cursor: pointer;
-}
-.asDmThreadItem:hover { border-color: #4c7ca4; background: #f3f8fc; }
-.asDmPair { font-weight: 700; font-size: 13px; color: #1c2733; }
-.asDmPrev { font-size: 12px; color: #5c6670; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.asDmMeta { font-size: 11px; color: #8a97a3; }
-#asDmThread {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border: 1px solid #d3dde6;
-  border-radius: 9px;
-  padding: 8px;
-  background: #fafbfc;
-  flex-shrink: 0;
-}
-.asDmThreadHead { display: flex; align-items: center; gap: 6px; }
-.asDmThreadHead .asDmPair { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.asDmThreadHead button, .asDmActs button {
-  border: none;
-  border-radius: 8px;
-  padding: 5px 9px;
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-  color: #fff;
-  background: #4c7ca4;
-  flex-shrink: 0;
-}
-.asDmThreadHead button { background: #8a97a3; }
-.asDmActs { display: flex; gap: 5px; flex-wrap: wrap; }
-.asDmActs .dangerBtn { background: #d65a5a; }
-.asDmMsgs { display: flex; flex-direction: column; gap: 5px; max-height: 260px; overflow-y: auto; }
-.asDmMsg { border: 1px solid #e3eaf0; border-radius: 8px; padding: 5px 7px; background: #fff; }
-.asDmMsgHead { display: flex; align-items: baseline; gap: 6px; }
-.asDmWho { font-weight: 700; font-size: 12px; color: #1c2733; }
-.asDmWhen { margin-left: auto; font-size: 10.5px; color: #8a97a3; flex-shrink: 0; }
-.asDmMsgHead button {
-  border: none;
-  border-radius: 6px;
-  padding: 2px 7px;
-  font-size: 10.5px;
-  font-weight: 600;
-  cursor: pointer;
-  color: #fff;
-  background: #d65a5a;
-  flex-shrink: 0;
-}
-.asDmMsgBody { font-size: 12.5px; color: #1c2733; white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
-body.dark #asDmThread { background: #242429; border-color: #3a3a44; }
-body.dark .asDmThreadItem, body.dark .asDmMsg { background: #2b2b33; border-color: #3a3a44; }
-body.dark .asDmPair, body.dark .asDmWho, body.dark .asDmMsgBody { color: #ececf1; }
-body.dark .asDmPrev { color: #b7b7c1; }
 
 /* ---------- first message guide bubble ---------- */
 #firstMsgGuide {
@@ -4054,65 +4005,6 @@ body.dark .msg.out .tsrow .dmSeenTick:not(.seen) svg { color: #b0a2e4; }
    the accent tone there instead of the bubble-tuned colours above. */
 .imgBubble .tsrow .dmSeenTick.seen svg { color: #7fb4f2 !important; }
 
-/* ---------- admin: private chats in the chat list ----------
-   The admin's read-only window into *other people's* private conversations.
-   Same target as the admin panel's "Private chats" section, but opened from
-   the chat list itself, so moderating never leaves the chat UI. It reuses the
-   panel's message cards (`.asDmMsg`), so only the screen frame is styled here
-   (the rest comes from `.asDmMsg` / `.asHint` / `.asDmActs`). */
-#monitorScreen {
-  flex: 1; min-height: 0; display: flex; flex-direction: column;
-  background: #fbfcfd;
-}
-body.dark #monitorScreen { background: #18181a; }
-#monitorBarEl {
-  flex-shrink: 0; padding: 9px 12px; border-bottom: 1px solid #e3eaf0;
-  display: flex; flex-direction: column; gap: 6px; background: #f3f7fa;
-}
-body.dark #monitorBarEl { background: #1f1f21; border-color: rgba(255, 255, 255, 0.08); }
-.monitorTitle { font-weight: 700; font-size: 14px; color: #1c2733; display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
-body.dark .monitorTitle { color: #ececf1; }
-.monitorName { display: inline-flex; align-items: center; gap: 1px; }
-.monitorDot { opacity: 0.5; padding: 0 2px; }
-#monitorBarEl .asDmActs button { cursor: pointer; }
-#monitorScrollCtn { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: calc(var(--compose-h, 68px) + 2px); }
-/* The monitor renders with the same renderer as the room and a normal private
-   chat, so its list container matches theirs (see #messagesEl). */
-#monitorMessagesEl { display: flex; flex-direction: column; gap: 5px; padding: 10px 9px 8px; }
-#monitorMessagesEl > .msg, #monitorMessagesEl > .sys, #monitorMessagesEl > .sep { animation: msgIn 0.28s ease-out; }
-/* The admin's per-message moderator delete, in a bubble's timestamp row. */
-.monDeleteBtn {
-  border: none; background: none; color: #9aa9b6; cursor: pointer; padding: 0 2px;
-  display: inline-flex; align-items: center; vertical-align: -2px; margin-left: 4px;
-}
-.monDeleteBtn:hover, .monDeleteBtn.armed { color: #c62828; }
-body.dark .monDeleteBtn { color: #9aa0a8; }
-body.dark .monDeleteBtn:hover, body.dark .monDeleteBtn.armed { color: #ff7b7b; }
-/* The list row for a monitored conversation (admin only). */
-.pAvatar.adminAv { background: linear-gradient(135deg, #6b7280, #3f4652); font-size: 14px; }
-.pRow.adminRow .pName { font-size: 13.5px; }
-.pMonitorTag {
-  margin-left: 6px; padding: 1px 5px; border-radius: 4px; flex-shrink: 0;
-  background: #eef2f6; color: #7b93a3; font-size: 9.5px; font-weight: 700;
-  letter-spacing: .4px; text-transform: uppercase;
-}
-body.dark .pMonitorTag { background: #33333d; color: #9aa0a8; }
-/* The banner that makes a "view as" session obvious, with its way out. */
-.viewAsRow {
-  display: flex; align-items: center; gap: 8px; padding: 9px 12px;
-  margin: 8px 6px 2px; border-radius: 10px; background: #eaf3fb;
-  color: #1c4a6e; font-size: 12.5px; font-weight: 600;
-}
-body.dark .viewAsRow { background: #2b3440; color: #cfe4f7; }
-.viewAsLabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.viewAsExit {
-  border: none; background: #2f6f9f; color: #fff; font-size: 11.5px;
-  font-weight: 700; padding: 4px 10px; border-radius: 7px; cursor: pointer;
-}
-.viewAsExit:hover { background: #24597f; }
-@media (min-width: 820px) {
-  #monitorScreen { grid-area: msgs; margin-top: 8px; margin-bottom: calc(-1 * var(--compose-h, 68px)); padding-bottom: calc(var(--compose-h, 68px) + 2px); min-height: 0; }
-}
 @media (max-width: 819px) {
   body { height: var(--vvh, 100dvh); }
   #app.peopleMode #topbar { display: none; }
