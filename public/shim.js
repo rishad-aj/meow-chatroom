@@ -942,7 +942,6 @@ SupaSocket.prototype._dmSend = function (m) {
   if (to !== self._myName) self._inboxSend(self._myName, b);
 };
 SupaSocket.prototype.rpc = {};
-SupaSocket.prototype.rpc.reportLoc = function () { return Promise.resolve("ok"); };
 SupaSocket.prototype.rpc.getBanned = function () {
   return metaGet("bans", []).then(function (b) { return JSON.stringify((Array.isArray(b) ? b : []).map(function (x) { return x.name; })); });
 };
@@ -994,14 +993,6 @@ SupaSocket.prototype.rpc.getOnline = function () {
       if (flow && !seen[flow]) { seen[flow] = 1; list.push({ name: fake[j], count: 1 }); }
     }
     return JSON.stringify(list);
-  });
-};
-SupaSocket.prototype.rpc.getNetworks = function () {
-  var self = this;
-  if (self._myName !== ADMIN_NAME) return Promise.resolve("admin only");
-  return self.rpc.getOnline.call(self).then(function (j) {
-    var list = JSON.parse(j);
-    return JSON.stringify(list.map(function (e) { return { name: e.name, loc: "", online: 1, isProxy: 0, net: [] }; }));
   });
 };
 SupaSocket.prototype.rpc.getPfps = function () {

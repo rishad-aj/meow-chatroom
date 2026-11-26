@@ -1932,7 +1932,6 @@ const PIN_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" str
 const FLAG_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 21V3.5"/><path d="M5.5 3.5h11l-2.2 4.2L16.5 12H5.5"/></svg>';
 const COPY_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
 const BAN_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>';
-const INFO_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v.01"/><path d="M12 11.5V16"/></svg>';
 const UNBAN_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5.5-5.5"/></svg>';
 const SAVE_SVG = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5004 11.9998H5.00043M4.91577 12.2913L2.58085 19.266C2.39742 19.8139 2.3057 20.0879 2.37152 20.2566C2.42868 20.4031 2.55144 20.5142 2.70292 20.5565C2.87736 20.6052 3.14083 20.4866 3.66776 20.2495L20.3792 12.7293C20.8936 12.4979 21.1507 12.3822 21.2302 12.2214C21.2993 12.0817 21.2993 11.9179 21.2302 11.7782C21.1507 11.6174 20.8936 11.5017 20.3792 11.2703L3.66193 3.74751C3.13659 3.51111 2.87392 3.39291 2.69966 3.4414C2.54832 3.48351 2.42556 3.59429 2.36821 3.74054C2.30216 3.90893 2.3929 4.18231 2.57437 4.72906L4.91642 11.7853C4.94759 11.8792 4.96317 11.9262 4.96933 11.9742C4.97479 12.0168 4.97473 12.0599 4.96916 12.1025C4.96289 12.1506 4.94718 12.1975 4.91577 12.2913Z" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const ADMIN_BADGE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="14" height="14"> <defs> <image width="1081" height="1080" id="agBg" href="data:image/png;base64,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"/> </defs> <g id="Background"> <use id="Path 1" href="#agBg" x="-1" y="0"/> <path id="Path 2" fill="#ffffff" d="m698.06 378.95c-2.03 0.6-6.68 3.09-10.33 5.55-3.65 2.46-9.74 8.06-13.53 12.44-3.78 4.39-10.09 12.07-14.02 17.08-3.92 5-11.78 14.97-17.46 22.14-5.68 7.18-17.64 21.89-26.57 32.7-8.93 10.81-17.88 21.77-19.9 24.35-2.02 2.58-18.89 23.94-37.47 47.48-18.59 23.54-36.61 45.79-40.05 49.44-3.43 3.66-11.88 14.28-18.77 23.62-6.89 9.33-14.61 18.79-17.16 21.03-3.72 3.25-5.22 3.76-7.59 2.58-1.62-0.81-20.88-19.08-42.8-40.59-28.82-28.29-41.78-40.01-46.85-42.37-5.51-2.57-9.7-3.27-19.56-3.27-9.42 0-14.19 0.74-19.18 2.99-3.66 1.64-9.55 5.6-13.1 8.8-3.55 3.2-8.37 9.63-10.7 14.3-3.65 7.3-4.24 10.19-4.23 20.66 0.01 9.59 0.74 13.74 3.43 19.56 1.99 4.3 9.18 13.53 17.23 22.13 7.6 8.12 25.82 26.94 40.48 41.83 14.66 14.88 37.62 37.43 51.01 50.09 16.54 15.65 26.72 24.12 31.73 26.42 4.06 1.86 11.69 3.83 16.97 4.37 8.86 0.9 10.42 0.59 20.47-4.05 7.79-3.59 13.03-7.33 18.45-13.15 4.16-4.47 11.88-13.43 17.16-19.92 5.28-6.49 14.24-17.8 19.92-25.14 5.69-7.34 27.93-35.16 49.44-61.82 21.51-26.67 45.75-56.93 53.87-67.26 8.12-10.32 26.76-33.64 41.43-51.81 14.68-18.17 32.85-41.01 40.4-50.75 7.54-9.74 15.29-20.87 17.23-24.72 1.93-3.86 3.92-9.5 4.43-12.55 0.52-3.15-0.11-10.29-1.46-16.6-1.37-6.4-4.18-13.87-6.66-17.71-2.36-3.65-6.85-8.59-9.98-10.98-3.13-2.39-7.85-5.21-10.49-6.27-2.85-1.15-10.34-1.88-18.45-1.81-7.51 0.07-15.31 0.62-17.34 1.21z"/> </g> </svg>';
@@ -1983,16 +1982,6 @@ function el(tag, cls, text) {
   if (cls) n.className = cls;
   if (text != null) n.textContent = text;
   return n;
-}
-
-function locNetEl(loc, proxy) {
-  const d = el("div", "olNet");
-  const isVpn = typeof loc === "string" && loc.endsWith(" \u26A0VPN");
-  if (isVpn) loc = loc.slice(0, -5);
-  if (loc) d.appendChild(document.createTextNode(loc));
-  if (proxy) d.appendChild(el("span", "olBadge vpn", "VPN/Proxy"));
-  else if (isVpn) d.appendChild(el("span", "olBadge vpn", "VPN?"));
-  return d;
 }
 
 const PROF_MASK_CHARS = (() => {
@@ -2406,26 +2395,6 @@ plogoutOkBtn.addEventListener("click", () => {
   promptProtectedLogin(pendingProtectedName || savedNick || myName);
   pendingProtectedName = "";
 });
-
-let regionBlocked = false;
-const regionModal = document.getElementById("regionModal");
-const regionTitle = document.getElementById("regionTitle");
-function showRegionBlocked() {
-  regionBlocked = true;
-  regionTitle.textContent = myCountry === "Pakistan" ? "Unavailable in Pakistan" : "Unavailable in India";
-  regionModal.classList.remove("hide");
-}
-document.getElementById("regionOkBtn").addEventListener("click", () => regionModal.classList.add("hide"));
-
-let vpnBlocked = false;
-const vpnModal = document.getElementById("vpnModal");
-function showVpnBlocked() {
-  vpnBlocked = true;
-  nickModal.classList.remove("force");
-  nickModal.classList.add("hide");
-  vpnModal.classList.remove("hide");
-}
-document.getElementById("vpnOkBtn").addEventListener("click", () => vpnModal.classList.add("hide"));
 
 tacAgreeBtn.addEventListener("click", () => {
   tacAgreed = true;
@@ -3368,7 +3337,6 @@ async function renderOnlineList() {
         top.appendChild(off);
       }
       left.appendChild(top);
-      if (isAdmin() && (u.loc || u.proxy)) left.appendChild(locNetEl(u.loc || "", u.proxy));
       row.appendChild(left);
       // Tapping someone here is a shortcut into a private chat with them.
       row.addEventListener("click", () => {
@@ -3403,33 +3371,6 @@ function ensureOnlineClickable() {
   onlineSub.addEventListener("click", openOnlineList);
 }
 ensureOnlineClickable();
-
-async function showUserInfo(name) {
-  if (!isAdmin()) return;
-  onlineTitle.textContent = "Info · " + name;
-  onlineBody.textContent = "Loading…";
-  onlineModal.classList.remove("hide");
-  clearInterval(onlineTimer);
-  try {
-    const r = await socket.rpc.getNetworks("");
-    const list = JSON.parse(r);
-    const u = (list || []).find((x) => x.name === name);
-    onlineBody.textContent = "";
-    if (!u) { onlineBody.appendChild(el("div", "olLegend", "Not connected · use the Online panel for the full list")); return; }
-    const row = el("div", "onlineUser");
-    const av = el("div", "olAvatar");
-    if (name === "admin") av.classList.add("adminAvatar");
-    paintAvatar(av, name);
-    row.appendChild(av);
-    const left = el("div", "olMain");
-    left.appendChild(el("div", "olName", name));
-    if (u.loc || u.isProxy) left.appendChild(locNetEl(u.loc || "", u.isProxy));
-    row.appendChild(left);
-    onlineBody.appendChild(row);
-  } catch (e) {
-    onlineBody.textContent = "couldn't load info";
-  }
-}
 
 /* ---------- reply / mention ---------- */
 let replyToMsg = null;
@@ -5640,8 +5581,6 @@ function handleMessage(m) {
     refreshBanUI(name);
   } else if (m.t === "you_banned") {
     showBannedModal();
-  } else if (m.t === "vpn_blocked") {
-    showVpnBlocked();
   } else if (m.t === "protected_logout") {
     const oldName = String(m.name || "");
     myName = null;
@@ -6629,16 +6568,16 @@ function forceCleanReconnect() {
   }, 700);
 }
 
-function silentAutoLoginRetry(s, loc, delay) {
+function silentAutoLoginRetry(s, delay) {
   const d = delay || 4000;
   setTimeout(async () => {
-    if (regionBlocked || vpnBlocked || savedNickApplied || !savedNick) return;
+    if (savedNickApplied || !savedNick) return;
     if (false) return; // persistence: protected names stay logged in with saved password
     if (needsPass(savedNick) && !savedAdminPass) { promptNickReentry(); return; }
     if (!s || s !== socket || s.readyState !== 1) return;
     let r = null;
     try {
-      const payload = JSON.stringify({ name: savedNick, uid: myUid, ...(needsPass(savedNick) && savedAdminPass ? { password: savedAdminPass } : {}), loc: loc || "" });
+      const payload = JSON.stringify({ name: savedNick, uid: myUid, ...(needsPass(savedNick) && savedAdminPass ? { password: savedAdminPass } : {}) });
       r = await claimSavedName(s, payload, 8000);
     } catch (e) { r = null; }
     if (r === "ok") {
@@ -6649,16 +6588,13 @@ function silentAutoLoginRetry(s, loc, delay) {
       updateGate();
       persistNick(savedNick, needsPass(savedNick) ? savedAdminPass : "");
       if (savedNick === "admin") addAdminActionButtons();
-      vpnModal.classList.add("hide");
       return;
     }
     if (r === "banned") { showBannedModal(); return; }
     if (r === "name_taken") { const taken = savedNick; savedNick = ""; lsSet(nickKvKey, ""); showNameTaken(taken); return; }
     if (r === "wrong_password") { if (needsPass(savedNick)) promptNickReentry(); return; }
-    if (r === "unavailable_region") { showRegionBlocked(); return; }
-    if (r === "vpn_blocked") { showVpnBlocked(); return; }
 
-    silentAutoLoginRetry(s, loc, Math.min(d * 1.7, 30000));
+    silentAutoLoginRetry(s, Math.min(d * 1.7, 30000));
   }, d);
 }
 window.addEventListener("pageshow", (e) => { if (e.persisted) forceCleanReconnect(); });
@@ -6678,118 +6614,8 @@ window.addEventListener("visibilitychange", () => {
   }
 });
 
-let myLocPromise = null;
-let myCountry = "";
-const VPN_HINT_WORDS = [
-  "vpn", "proxy", "nord", "surfshark", "expressvpn", "private internet access", "cyberghost",
-  "windscribe", "mullvad", "vyprvpn", "purevpn", "hotspot shield", "tunnelbear", "betternet",
-  "hide.me", "ivpn", "proton", "atlas vpn", "ipvanish", "hidemyass",
-  "m247", "datacamp", "datapacket", "leaseweb", "ovh", "hetzner", "digitalocean", "linode",
-  "vultr", "contabo", "choopa", "psychz", "quadranet", "scaleway", "cloudsigma", "ionos",
-  "hostinger", "hosting", "data center", "datacenter", "colo", "cloud", "amazonaws", "azure"
-];
-function detectVpn(d) {
-  if (!d) return false;
-  const sec = d.security || {};
-  if (sec.vpn || sec.proxy || sec.tor || sec.anonymous || sec.relay) return true;
-  const conn = d.connection || {};
-  if (conn.type === "hosting") return true;
-  const org = String(conn.org || conn.isp || "").toLowerCase();
-  return !!org && VPN_HINT_WORDS.some((w) => org.includes(w));
-}
-async function fetchJsonTimeout(url, ms, asText) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), ms);
-  try {
-    const r = await fetch(url, { signal: ctrl.signal });
-    if (!r.ok) return null;
-    return asText ? await r.text() : await r.json();
-  } catch (e) {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-function geoCountryName(code) {
-  if (!code) return "";
-  if (/^[A-Za-z]{2}$/.test(code)) {
-    try {
-      const n = new Intl.DisplayNames(["en"], { type: "region" }).of(code.toUpperCase());
-      if (n && n !== code) return n;
-    } catch (e) {}
-  }
-  return code;
-}
-const GEO_CACHE_KEY = "tgGeo_" + (window.generatorName || "chat");
-const GEO_TTL = 6 * 60 * 60 * 1000;
-// Several free IP-geolocation services are tried in turn: each returns
-// { country, city, region, vpn } or null. A single provider being
-// rate-limited/CORS-blocked used to leave every user with an empty location.
-const GEO_PROVIDERS = [
-  async () => {
-    const d = await fetchJsonTimeout("https://get.geojs.io/v1/ip/geo.json", 5000);
-    if (!d || (!d.country && !d.country_code)) return null;
-    return { country: d.country || geoCountryName(d.country_code), city: d.city, region: d.region, vpn: false };
-  },
-  async () => {
-    const d = await fetchJsonTimeout("https://ipinfo.io/json", 5000);
-    if (!d || d.error) return null;
-    return { country: geoCountryName(d.country), city: d.city, region: d.region, vpn: false };
-  },
-  async () => {
-    const d = await fetchJsonTimeout("https://api.db-ip.com/v2/free/self", 5000);
-    if (!d || (!d.countryName && !d.countryCode)) return null;
-    return { country: d.countryName || geoCountryName(d.countryCode), city: d.city, region: d.stateProv, vpn: false };
-  },
-  async () => {
-    const d = await fetchJsonTimeout("https://ipwho.is/", 5000);
-    if (!d || d.success === false) return null;
-    return { country: d.country, city: d.city, region: d.region, vpn: detectVpn(d) };
-  },
-  async () => {
-    const d = await fetchJsonTimeout("https://api.country.is", 5000);
-    if (!d || !d.country) return null;
-    return { country: geoCountryName(d.country), city: "", region: "", vpn: false };
-  },
-  async () => {
-    const t = await fetchJsonTimeout("https://1.1.1.1/cdn-cgi/trace", 5000, true);
-    const cc = t && (t.match(/^loc=([A-Za-z]{2})$/m) || [])[1];
-    if (!cc) return null;
-    return { country: geoCountryName(cc), city: "", region: "", vpn: false };
-  },
-];
-function geoFromCache() {
-  try {
-    const o = JSON.parse(lsGet(GEO_CACHE_KEY) || "");
-    if (!o || !o.ts || Date.now() - o.ts > GEO_TTL) return null;
-    return o;
-  } catch (e) {
-    return null;
-  }
-}
-async function resolveGeo() {
-  const cached = geoFromCache();
-  if (cached) {
-    myCountry = cached.country || "";
-    return cached.loc || "";
-  }
-  for (const provider of GEO_PROVIDERS) {
-    try {
-      const g = await provider();
-      if (g && g.country) {
-        myCountry = String(g.country);
-        const loc = [g.city, g.region, g.country].filter(Boolean).join(", ") + (g.vpn ? " \u26A0VPN" : "");
-        try { lsSet(GEO_CACHE_KEY, JSON.stringify({ ts: Date.now(), country: myCountry, loc })); } catch (e) {}
-        return loc;
-      }
-    } catch (e) {}
-  }
-  return "";
-}
-function getMyIPLocation() {
-  if (!myLocPromise) myLocPromise = resolveGeo().catch(() => "");
-  return myLocPromise;
-}
+// Clear any previously cached IP-geolocation entry from older sessions.
+try { localStorage.removeItem("tgGeo_" + (window.generatorName || "chat")); } catch (e) {}
 
 let historyLoaded = false;
 let historyLoading = false;
@@ -6810,7 +6636,7 @@ async function claimSavedName(s, payload, maxWaitMs) {
   let r = null;
   for (;;) {
     try { r = await s.rpc.setName(payload); } catch (err) { r = null; }
-    if (r === "ok" || r === "banned" || r === "wrong_password" || r === "unavailable_region" || r === "vpn_blocked") return r;
+    if (r === "ok" || r === "banned" || r === "wrong_password") return r;
     if (Date.now() - t0 > (maxWaitMs || 8000)) return r;
     await new Promise((res) => setTimeout(res, r === "name_taken" ? 1500 : 500));
   }
@@ -6848,16 +6674,6 @@ function connect() {  // Exactly one live socket at a time. A reconnect replaces
     reconnectDelay = 500;
     try { clearTimeout(linkDownTimer); } catch (e) {}
     try {
-      // Do not block startup on external IP geolocation: use cached value
-      // immediately and refresh in the background.
-      const cachedGeo = geoFromCache();
-      let loc = cachedGeo ? (cachedGeo.loc || "") : "";
-      if (cachedGeo && cachedGeo.country) myCountry = cachedGeo.country;
-      getMyIPLocation().then((freshLoc) => {
-        if (freshLoc) { try { s.rpc.reportLoc(freshLoc).catch(() => {}); } catch (e) {} }
-      }).catch(() => {});
-      if (loc) { try { s.rpc.reportLoc(loc).catch(() => {}); } catch (e) {} }
-
       // Kick off independent room metadata & reply KV fetches in parallel
       // immediately so they finish alongside login instead of serially.
       const replyKvP = replyKvEnsure().catch(() => {});
@@ -6898,7 +6714,7 @@ function connect() {  // Exactly one live socket at a time. A reconnect replaces
           currentApplied = true;
           let r = null;
           try {
-            const payload = JSON.stringify({ name: savedNick, uid: myUid, ...(needsPass(savedNick) && savedAdminPass ? { password: savedAdminPass } : {}), loc });
+            const payload = JSON.stringify({ name: savedNick, uid: myUid, ...(needsPass(savedNick) && savedAdminPass ? { password: savedAdminPass } : {}) });
             r = await claimSavedName(s, payload, 8000);
           } catch (err) { r = null; }
           if (r === "ok") {
@@ -6909,16 +6725,13 @@ function connect() {  // Exactly one live socket at a time. A reconnect replaces
             updateGate();
             persistNick(savedNick, needsPass(savedNick) ? savedAdminPass : "");
             if (savedNick === "admin") addAdminActionButtons();
-            vpnModal.classList.add("hide");
           }
           if (r === "banned") { bannedOnConnect = true; showBannedModal(); }
-          else if (r === "unavailable_region") { showRegionBlocked(); }
-          else if (r === "vpn_blocked") { showVpnBlocked(); }
           else if (r === "wrong_password") { if (needsPass(savedNick)) promptNickReentry(); }
           else if (r === "name_taken") { const taken = savedNick; savedNick = ""; lsSet(nickKvKey, ""); showNameTaken(taken); }
-          else if (savedNick && r !== "ok" && !savedNickApplied) silentAutoLoginRetry(s, loc);
+          else if (savedNick && r !== "ok" && !savedNickApplied) silentAutoLoginRetry(s);
         }
-        if (!savedNickApplied && !savedNick && !joinedOnce && tacAgreed && ageApproved && !bannedOnConnect && !vpnBlocked) forceNick();
+        if (!savedNickApplied && !savedNick && !joinedOnce && tacAgreed && ageApproved && !bannedOnConnect) forceNick();
       })();
 
       // Wait for reply KV + PFPs (already in flight) then render history in parallel with login.
@@ -8228,15 +8041,11 @@ nickOkBtn.addEventListener("click", async () => {
     toast(wantsAdmin ? "Enter the admin password" : "Enter the password for " + protName);
     return;
   }
-  if (!wantsAdmin && (myCountry === "India" || myCountry === "Pakistan")) {
-    showRegionBlocked();
-    return;
-  }
   for (let i = 0; i < 50 && !(socket && socket.readyState === 1); i++) await new Promise((r) => setTimeout(r, 200));
   if (!socket || socket.readyState !== 1) return;
   if (pfpBusy) { toast("Wait for the photo to finish uploading"); return; }
   try {
-    const payload = { name, uid: myUid, ...(needsPassword ? { password: nickPassInput.value } : {}), loc: await getMyIPLocation() };
+    const payload = { name, uid: myUid, ...(needsPassword ? { password: nickPassInput.value } : {}) };
     // Only sent when this visit actually changed the picture, so an ordinary
     // rename never clears it.
     if (pfpDraft !== null) payload.pfp = pfpDraft;
@@ -8258,7 +8067,6 @@ nickOkBtn.addEventListener("click", async () => {
       else if (protName) toast("Signed in as " + protName);
       nickModal.classList.remove("force");
       nickModal.classList.add("hide");
-      vpnModal.classList.add("hide");
       if (name === "admin") {
         addAdminActionButtons();
       }
@@ -8287,10 +8095,6 @@ nickOkBtn.addEventListener("click", async () => {
     } else if (r === "name_taken") {
       toast("\u201C" + name + "\u201D is already in use \u2014 please pick another name");
       nickInput.focus();
-    } else if (r === "vpn_blocked") {
-      showVpnBlocked();
-    } else if (r === "unavailable_region") {
-      showRegionBlocked();
     } else if (r === "banned") {
       showBannedModal();
       toast("That name is banned in this chat");
@@ -8605,7 +8409,6 @@ const actCopyBtn = document.getElementById("actCopyBtn");
 const actEditBtn = document.getElementById("actEditBtn");
 const actVerBtn = document.getElementById("actVerBtn");
 const actFlagBtn = document.getElementById("actFlagBtn");
-const actInfoBtn = document.getElementById("actInfoBtn");
 const actBanBtn = document.getElementById("actBanBtn");
 const actDelBtn = document.getElementById("actDelBtn");
 const actPinBtn = document.getElementById("actPinBtn");
@@ -8617,7 +8420,6 @@ actEditBtn.innerHTML = EDIT_SVG;
 actPinBtn.innerHTML = PIN_SVG;
 actDelBtn.innerHTML = DEL_SVG;
 actFlagBtn.innerHTML = FLAG_SVG;
-actInfoBtn.innerHTML = INFO_SVG;
 actBanBtn.innerHTML = BAN_SVG;
 actVerBtn.innerHTML = VERIFY_SVG;
 
@@ -8641,7 +8443,6 @@ function updateSelBar() {
   const dm = convo.mode === "dm";
   actVerBtn.classList.toggle("hide", !admin || dm);
   actFlagBtn.classList.toggle("hide", !mod || dm);
-  actInfoBtn.classList.toggle("hide", !admin || dm);
   actBanBtn.classList.toggle("hide", !mod || dm);
   const ver = target && verifiedSet.has(target);
   actVerBtn.title = ver ? "Remove verification badge" : "Give verification badge to " + (target || "user");
@@ -8659,7 +8460,7 @@ function updateSelBar() {
   const selList = [...selItems.values()];
   const single = selList.length === 1 ? selList[0] : null;
   actEditBtn.classList.toggle("hide", !(single && isMine(single) && (single.t === "chat" || single.t === "img")));
-  const btmEmpty = [actVerBtn, actFlagBtn, actInfoBtn, actBanBtn].every((b) => b.classList.contains("hide"));
+  const btmEmpty = [actVerBtn, actFlagBtn, actBanBtn].every((b) => b.classList.contains("hide"));
   selActionBar.classList.toggle("empty", btmEmpty);
   appEl.classList.toggle("selModeNoComposer", selectionMode && !btmEmpty);
 }
@@ -9751,11 +9552,6 @@ actFlagBtn.addEventListener("click", () => {
   endSelection();
   toast("Message(s) flagged for review");
 });
-actInfoBtn.addEventListener("click", () => {
-  const users = distinctSelUsers();
-  if (users.length) showUserInfo(users[0]);
-  endSelection();
-});
 actBanBtn.addEventListener("click", () => {
   const users = distinctSelUsers();
   if (!users.length || !socket || socket.readyState !== 1) return;
@@ -9827,7 +9623,7 @@ window.addEventListener("resize", () => { if (firstMsgGuide.classList.contains("
 function showNextOnboarding() {
   if (!tacAgreed) { tacModal.classList.remove("hide"); return; }
   if (!ageApproved) { ageModal.classList.remove("hide"); return; }
-  if (!savedNick && !savedNickApplied && !vpnBlocked) { forceNick(); return; }
+  if (!savedNick && !savedNickApplied) { forceNick(); return; }
 }
 const agePreApprove = lsGet(ageKey) === "1" && lsGet(ageKey + "_blocked") !== "1";
 const ageBlocked = lsGet(ageKey + "_blocked") === "1";

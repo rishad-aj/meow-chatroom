@@ -1430,8 +1430,6 @@ body.dark .mOnlineDot { box-shadow: 0 0 0 2px #18181c; }
 #tacModal { z-index: 90; }
 #ageModal { z-index: 96; }
 #nickModal, #bannedModal { z-index: 93; }
-#regionModal { z-index: 94; }
-#vpnModal { z-index: 94; }
 #changePassModal, #delAccModal { z-index: 95; }
 .tacCard { width: 320px; max-height: 80vh; display: flex; flex-direction: column; }
 .tacBody { overflow-y: auto; font-size: 13.5px; line-height: 1.55; color: #444; margin: 2px 0 4px; }
@@ -1467,10 +1465,7 @@ body.dark .mOnlineDot { box-shadow: 0 0 0 2px #18181c; }
 .onlineUser .olTag { margin-left: auto; font-size: 11px; color: #d4a017; font-weight: 700; flex-shrink: 0; }
 .onlineUser .olMain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .onlineUser .olTop { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.onlineUser .olNet { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #78909c; font-family: var(--font-mono); }
 .onlineUser .olBadge { font-family: inherit; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 20px; letter-spacing: .3px; }
-.onlineUser .olBadge.vpn { background: #fde8e8; color: #c62828; }
-.onlineModal .olLegend { padding: 8px 6px 2px; font-size: 11px; color: #90a4ae; }
 
 #onlineSub.adminOn { cursor: pointer; }
 #onlineSub.adminOn:hover { text-decoration: underline; }
@@ -3172,7 +3167,6 @@ body.dark .onlineCard {
   -webkit-backdrop-filter: blur(18px) saturate(150%);
 }
 body.dark .onlineUser .olAvatar { background: #8774e1; }
-body.dark .onlineUser .olBadge.vpn { background: rgba(239, 83, 80, 0.2); color: #ff8a80; }
 body.dark .card a { color: #a08ef9; }
 body.dark .card input, body.dark .card textarea {
   border-color: #3a3a44;
@@ -3203,8 +3197,6 @@ body.dark .pfpBtns button.dangerBtn { color: #ff7b72 !important; }
 body.dark .onlineUser { border-bottom-color: #2c2c34; }
 body.dark .onlineUser:hover { background: #2e2e36; }
 body.dark .onlineUser .olName { color: #ffffff; }
-body.dark .onlineUser .olNet { color: #8f959d; }
-body.dark .onlineModal .olLegend { color: #8f959d; }
 body.dark #installBody { color: #b6bcc4; }
 body.dark #installBody .ibHead { color: #e6e6ea; }
 body.dark #installBody .istep .num { background: #8774e1; }

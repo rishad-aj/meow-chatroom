@@ -217,6 +217,10 @@ function proxySupabaseHttp(req, res, parsedUrl) {
     "x-forwarded-for",
     "x-forwarded-host",
     "x-forwarded-proto",
+    "x-real-ip",
+    "cf-connecting-ip",
+    "true-client-ip",
+    "forwarded",
   ]);
   for (const [k, v] of Object.entries(req.headers)) {
     if (!skipHeaders.has(k.toLowerCase()) && v !== undefined) {
