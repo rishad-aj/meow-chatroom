@@ -199,6 +199,8 @@ body.dark #app.selMode .msg.selected { background: rgba(255, 255, 255, 0.26); }
 #app.selMode .msg.selected .selCheck { background: #22c55e; border-color: #22c55e; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55); }
 #app.selMode .msg.selected .selCheck::after { content: "\2713"; color: #fff; font-size: 14px; font-weight: 800; line-height: 1; }
 #app.selMode .bubble > button { display: none !important; }
+#app.selMode .voiceBubble .playBtn,
+#app.selMode .voiceBubble .wave { pointer-events: none; }
 
 /* ---------- bottom selection action bar (replaces composer while selecting) ---------- */
 #selActionBar {
@@ -1150,8 +1152,28 @@ body.dark .mOnlineDot { box-shadow: 0 0 0 2px #18181c; }
 }
 
 /* ---------- voice bubbles ---------- */
-.bubble.voiceBubble { padding: 8px 10px 14px 9px; min-width: 210px; }
-.voiceTop { display: flex; align-items: center; gap: 9px; }
+.bubble.voiceBubble {
+  display: flex;
+  flex-direction: column;
+  padding: 9px 12px 8px 10px;
+  width: min(268px, 100%);
+  min-width: 0;
+  box-sizing: border-box;
+}
+.voiceTop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+.voiceTrack {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
 .playBtn {
   width: 40px;
   height: 40px;
@@ -1165,6 +1187,7 @@ body.dark .mOnlineDot { box-shadow: 0 0 0 2px #18181c; }
   justify-content: center;
   padding: 0;
   flex-shrink: 0;
+  transition: transform 0.12s ease, background 0.15s ease;
 }
 .playBtn:hover { background: #20689f; }
 .playBtn:active { transform: scale(0.94); }
@@ -1173,44 +1196,73 @@ body.dark .mOnlineDot { box-shadow: 0 0 0 2px #18181c; }
 .wave {
   display: flex;
   align-items: center;
-  gap: 2.5px;
+  justify-content: space-between;
+  gap: 2px;
   height: 24px;
+  width: 100%;
   min-width: 0;
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 .wave span {
-  width: 3px;
+  flex: 1 1 0;
+  min-width: 2px;
+  max-width: 3.5px;
   border-radius: 2px;
-  background: #9bc4e2;
-  flex-shrink: 0;
-  transform-origin: bottom;
+  background: #b8cfe0;
+  transform-origin: center;
+  transition: background-color 0.12s ease;
 }
-.wave span.played {
-  background: #4f97c7;
-  animation: barBob 0.7s ease-in-out infinite alternate;
+.msg.out .wave span { background: #9bc4e2; }
+.wave span.played { background: #2678b6; }
+.voiceBubble.is-playing .wave span.played {
+  animation: barBob 0.65s ease-in-out infinite alternate;
 }
 @keyframes barBob {
-  from { transform: scaleY(0.5); }
-  to { transform: scaleY(1.15); }
+  from { transform: scaleY(0.75); }
+  to { transform: scaleY(1.12); }
 }
-.voiceMeta {
-  font-size: 12px;
-  color: #5f97b9;
-  margin-top: 6px;
+.voiceFoot {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.voiceMeta {
+  font-size: 11.5px;
+  line-height: 1.2;
+  color: #707579;
+  display: flex;
+  align-items: center;
+  min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.msg.out .voiceMeta { color: #5f97b9; }
+.voiceBubble.is-active .voiceSize { display: none; }
+.voiceSize {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .unreadDot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: #2678b6;
   margin-left: 6px;
   flex-shrink: 0;
 }
-.voiceBubble .tsrow { margin-top: 2px; padding-top: 2px; }
+.msg.out .unreadDot { display: none; }
+.voiceBubble .tsrow {
+  margin-top: 0;
+  padding-top: 0;
+  align-self: flex-end;
+  flex-shrink: 0;
+}
 
 /* ---------- uploading placeholder ---------- */
 .uploadBubble {
@@ -1232,7 +1284,8 @@ body.dark .mOnlineDot { box-shadow: 0 0 0 2px #18181c; }
   display: flex;
   align-items: center;
   gap: 9px;
-  width: 210px;
+  width: min(210px, 100%);
+  min-width: 0;
 }
 .upPlaceholderCircle {
   width: 40px;
@@ -1586,7 +1639,7 @@ body.dark .mOnlineDot { box-shadow: 0 0 0 2px #18181c; }
 }
 .rxPill.mine:hover { background: rgba(37, 99, 235, 0.24); }
 .imgBubble .rxRow { padding: 0 8px; margin-bottom: -2px; }
-.voiceBubble .rxRow { margin: 5px 0 -4px; }
+.voiceBubble .rxRow { margin: 7px 0 0; }
 
 /* ---------- tap-to-react bar ---------- */
 #rxBar {

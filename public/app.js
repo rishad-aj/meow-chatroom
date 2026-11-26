@@ -3962,31 +3962,157 @@ function genBars(seed, n) {
   return bars;
 }
 
-function wirePlayback(playBtn, waveEl, url, dur, dot) {
+let activeVoiceAudio = null;
+
+function wirePlayback(bubble, playBtn, waveEl, durEl, url, dur, dot) {
   let audio = null;
+  let totalDur = Math.max(0, Number(dur) || 0);
+  let rafId = null;
   const bars = [...waveEl.children];
+
   const setPlayed = (p) => {
-    bars.forEach((b, i) => b.classList.toggle("played", i / bars.length < p));
+    const frac = Math.max(0, Math.min(1, Number(p) || 0));
+    const lit = frac > 0 ? Math.max(1, Math.round(frac * bars.length)) : 0;
+    for (let i = 0; i < bars.length; i++) {
+      bars[i].classList.toggle("played", i < lit);
+    }
   };
-  playBtn.addEventListener("click", () => {
-    if (audio && !audio.paused) {
-      audio.pause();
+
+  const syncDurText = (showCurrent) => {
+    if (!durEl) return;
+    if (showCurrent && audio && audio.currentTime > 0) {
+      const tot = totalDur > 0 ? totalDur : (Number.isFinite(audio.duration) ? audio.duration : 0);
+      durEl.textContent = tot > 0 ? fmtDur(audio.currentTime) + " / " + fmtDur(tot) : fmtDur(audio.currentTime);
+    } else {
+      durEl.textContent = fmtDur(totalDur);
+    }
+  };
+
+  const stopRaf = () => {
+    if (rafId != null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+  };
+
+  const tick = () => {
+    rafId = null;
+    if (!audio || audio.paused || audio.ended) return;
+    if (!bubble.isConnected) {
+      try { audio.pause(); } catch (e) {}
       return;
     }
-    if (!audio) {
-      audio = new Audio(url);
-      audio.ontimeupdate = () => setPlayed(audio.currentTime / Math.max(0.1, dur));
-      audio.onended = () => {
-        setPlayed(0);
-        playBtn.classList.remove("playing");
-        playBtn.innerHTML = PLAY_SVG;
-        if (dot) dot.remove();
-      };
+    const d = (Number.isFinite(audio.duration) && audio.duration > 0) ? audio.duration : totalDur;
+    if (d > 0) setPlayed(audio.currentTime / d);
+    syncDurText(true);
+    rafId = requestAnimationFrame(tick);
+  };
+
+  const setPlayingUi = (playing) => {
+    playBtn.classList.toggle("playing", playing);
+    bubble.classList.toggle("is-playing", playing);
+    playBtn.innerHTML = playing ? PAUSE_SVG : PLAY_SVG;
+    playBtn.setAttribute("aria-label", playing ? "Pause voice message" : "Play voice message");
+  };
+
+  const ensureAudio = () => {
+    if (audio) return audio;
+    audio = new Audio(url);
+    audio.preload = "metadata";
+    audio.addEventListener("loadedmetadata", () => {
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        totalDur = audio.duration;
+        if (audio.paused && audio.currentTime === 0) syncDurText(false);
+      }
+    });
+    audio.addEventListener("play", () => {
+      if (activeVoiceAudio && activeVoiceAudio !== audio) {
+        try { activeVoiceAudio.pause(); } catch (e) {}
+      }
+      activeVoiceAudio = audio;
+      if (dot && dot.parentNode) dot.remove();
+      bubble.classList.add("is-active");
+      setPlayingUi(true);
+      stopRaf();
+      rafId = requestAnimationFrame(tick);
+    });
+    audio.addEventListener("pause", () => {
+      stopRaf();
+      if (activeVoiceAudio === audio) activeVoiceAudio = null;
+      setPlayingUi(false);
+      if (!audio.ended && audio.currentTime > 0) {
+        const d = (Number.isFinite(audio.duration) && audio.duration > 0) ? audio.duration : totalDur;
+        if (d > 0) setPlayed(audio.currentTime / d);
+        syncDurText(true);
+      }
+    });
+    audio.addEventListener("timeupdate", () => {
+      if (!audio) return;
+      const d = (Number.isFinite(audio.duration) && audio.duration > 0) ? audio.duration : totalDur;
+      if (d > 0) setPlayed(audio.currentTime / d);
+      syncDurText(audio.currentTime > 0 && !audio.ended);
+    });
+    audio.addEventListener("ended", () => {
+      stopRaf();
+      if (activeVoiceAudio === audio) activeVoiceAudio = null;
+      setPlayed(0);
+      bubble.classList.remove("is-active");
+      setPlayingUi(false);
+      syncDurText(false);
+      if (dot && dot.parentNode) dot.remove();
+    });
+    audio.addEventListener("error", () => {
+      stopRaf();
+      if (activeVoiceAudio === audio) activeVoiceAudio = null;
+      setPlayed(0);
+      bubble.classList.remove("is-active");
+      setPlayingUi(false);
+      syncDurText(false);
+      toast("Couldn't play voice message");
+    });
+    return audio;
+  };
+
+  playBtn.addEventListener("click", (e) => {
+    if (selectionMode) return;
+    e.stopPropagation();
+    const a = ensureAudio();
+    if (!a.paused) {
+      a.pause();
+      return;
     }
-    audio.play().then(() => {
-      playBtn.classList.add("playing");
-      playBtn.innerHTML = PAUSE_SVG;
-    }).catch(() => {});
+    if (activeVoiceAudio && activeVoiceAudio !== a) {
+      try { activeVoiceAudio.pause(); } catch (err) {}
+    }
+    a.play().catch(() => {
+      setPlayingUi(false);
+      toast("Couldn't play voice message");
+    });
+  });
+
+  waveEl.addEventListener("click", (e) => {
+    if (selectionMode) return;
+    e.stopPropagation();
+    const rect = waveEl.getBoundingClientRect();
+    if (!rect.width) return;
+    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const a = ensureAudio();
+    const applySeek = () => {
+      const d = (Number.isFinite(a.duration) && a.duration > 0) ? a.duration : totalDur;
+      if (d > 0) {
+        try { a.currentTime = frac * d; } catch (err) {}
+        setPlayed(frac);
+        bubble.classList.add("is-active");
+        syncDurText(true);
+      }
+    };
+    if (a.readyState >= 1) {
+      applySeek();
+      if (a.paused) a.play().catch(() => {});
+    } else {
+      a.addEventListener("loadedmetadata", applySeek, { once: true });
+      a.play().catch(() => {});
+    }
   });
 }
 
@@ -3996,35 +4122,47 @@ function buildVoiceBubble(m, grouped) {
   const bubble = el("div", "bubble voiceBubble");
   applyAuthorOutline(bubble, m.from);
   wrap.dataset.ts = m.ts || "";
+  wrap.dataset.from = m.from || "";
   const sn = senderNameEl(m, mine, grouped);
   if (sn) bubble.appendChild(sn);
   if (m.replyTo) bubble.appendChild(replyQuoteEl(m.replyTo, nameColor(m.replyTo.from)));
   const top = el("div", "voiceTop");
   const play = document.createElement("button");
+  play.type = "button";
   play.className = "playBtn";
+  play.setAttribute("aria-label", "Play voice message");
   play.innerHTML = PLAY_SVG;
+  const track = el("div", "voiceTrack");
   const wave = el("div", "wave");
-  const bars = genBars(m.url, 32);
-  bars.forEach((h) => {
+  const bars = genBars(m.url, 28);
+  bars.forEach((h, idx) => {
     const b = document.createElement("span");
-    b.style.height = Math.round(h * 22) + "px";
+    b.style.height = Math.max(4, Math.round(h * 22)) + "px";
+    b.style.animationDelay = ((idx % 5) * 0.09).toFixed(2) + "s";
     wave.appendChild(b);
   });
-  top.appendChild(play);
-  top.appendChild(wave);
-  bubble.appendChild(top);
+  const foot = el("div", "voiceFoot");
   const meta = el("div", "voiceMeta");
-  meta.textContent = "Voice, " + fmtSize(m.size) + ", " + fmtDur(m.dur);
-  const dot = el("span", "unreadDot");
-  meta.appendChild(dot);
-  bubble.appendChild(meta);
-  bubble.appendChild(tsrowEl(m, mine));
+  const durEl = el("span", "voiceDur", fmtDur(m.dur));
+  meta.appendChild(durEl);
+  if (Number(m.size) > 0) {
+    meta.appendChild(el("span", "voiceSize", " · " + fmtSize(m.size)));
+  }
+  const dot = !mine ? el("span", "unreadDot") : null;
+  if (dot) meta.appendChild(dot);
+  foot.appendChild(meta);
+  foot.appendChild(tsrowEl(m, mine));
+  track.appendChild(wave);
+  track.appendChild(foot);
+  top.appendChild(play);
+  top.appendChild(track);
+  bubble.appendChild(top);
   rxRender(bubble, m);
   wrap.appendChild(bubble);
   wireSelection(wrap, bubble, m);
   wireReply(wrap, bubble, m);
   if (m.flagged) bubble.classList.add("flagged");
-  wirePlayback(play, wave, m.url, m.dur, dot);
+  wirePlayback(bubble, play, wave, durEl, m.url, m.dur, dot);
   return wrap;
 }
 function addVoiceBubble(m) {
@@ -6472,7 +6610,13 @@ async function startRecording() {
   }
   recStream = stream;
   recChunks = [];
-  mr = new MediaRecorder(stream);
+  let mrOpts;
+  if (typeof MediaRecorder !== "undefined" && typeof MediaRecorder.isTypeSupported === "function") {
+    const candidates = ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus", "audio/webm"];
+    const picked = candidates.find((t) => MediaRecorder.isTypeSupported(t));
+    if (picked) mrOpts = { mimeType: picked };
+  }
+  mr = mrOpts ? new MediaRecorder(stream, mrOpts) : new MediaRecorder(stream);
   mr.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
   mr.start();
   recStart = Date.now();
@@ -6493,19 +6637,21 @@ function stopRecording() {
   const m = mr;
   mr = null;
   const tracks = recStream ? recStream.getTracks() : [];
-  const done = m && m.state !== "inactive"
-    ? new Promise((resolve) => {
-        m.onstop = () => {
-          const blob = new Blob(recChunks, { type: String(m.mimeType || "audio/webm").split(";")[0] });
-          recChunks = [];
-          resolve(blob);
-        };
-        m.stop();
-      })
-    : Promise.resolve(null);
-  tracks.forEach((t) => t.stop());
   recStream = null;
-  return done;
+  const stopTracks = () => tracks.forEach((t) => { try { t.stop(); } catch (e) {} });
+  if (m && m.state !== "inactive") {
+    return new Promise((resolve) => {
+      m.onstop = () => {
+        stopTracks();
+        const blob = new Blob(recChunks, { type: String(m.mimeType || "audio/webm").split(";")[0] });
+        recChunks = [];
+        resolve(blob);
+      };
+      try { m.stop(); } catch (e) { stopTracks(); resolve(null); }
+    });
+  }
+  stopTracks();
+  return Promise.resolve(null);
 }
 
 async function sendVoice() {
