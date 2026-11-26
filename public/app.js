@@ -6326,8 +6326,8 @@ function renderRowsInto(rows) {
 function prependRows(rows) {
   const frag = document.createDocumentFragment();
   const ref = firstRealNode();
+  const refMsg = (ref && ref.classList.contains("msg")) ? (msgByWrap.get(ref) || null) : null;
   let prev = null;
-  if (ref && ref.classList.contains("msg")) prev = msgByWrap.get(ref) || null;
   let count = 0;
   for (const row of rows) {
     const id = "sb-" + row.id;
@@ -6337,19 +6337,28 @@ function prependRows(rows) {
     const m = enrichReply(sbRowToMsg(row));
     if (!m) continue;
     const grouped = !!(prev && prev.from === m.from);
-    frag.appendChild(buildMessageDom(m, grouped));
+    frag.appendChild(withMsgHost(roomMessagesEl, () => buildMessageDom(m, grouped)));
     prev = m;
     count++;
   }
   if (!count) return 0;
-  if (ref) roomMessagesEl.insertBefore(frag, ref);
-  else roomMessagesEl.appendChild(frag);
+  if (ref) {
+    roomMessagesEl.insertBefore(frag, ref);
+    if (prev && refMsg && prev.from && prev.from === refMsg.from) {
+      ref.classList.add("grouped");
+      const refSn = ref.querySelector(".bubble > .senderName");
+      if (refSn) refSn.remove();
+    }
+  } else {
+    roomMessagesEl.appendChild(frag);
+  }
+  scheduleLongSync();
   return count;
 }
 function maybeLoadOlder() {
   if (convo.mode !== "room") return;
   if (loadingOlder || allOlderLoaded || !oldestLoadedTs) return;
-  if (scrollCtnEl.scrollTop < 150) loadOlder();
+  if (scrollCtnEl.scrollTop < OLDER_TRIGGER_PX) loadOlder();
 }
 let olderFailures = 0;
 async function loadOlder() {
@@ -6359,20 +6368,24 @@ async function loadOlder() {
   const anchor = firstRealNode();
   const anchorTop = anchor ? anchor.getBoundingClientRect().top : null;
   const scrollTop = scrollCtnEl.scrollTop;
+  let added = 0;
   try {
+    const prevOldest = oldestLoadedTs;
     const rows = await sbFetchOlder(oldestLoadedTs, OLDER_PAGE);
     if (!rows.length) { allOlderLoaded = true; return; }
     const minTs = Math.min.apply(null, rows.map(rowTs).filter((t) => t > 0));
     if (isFinite(minTs)) oldestLoadedTs = Math.min(oldestLoadedTs || Infinity, minTs);
     const real = rows.filter(rowDomWorth).reverse();
-    let added = 0;
     if (real.length) added = prependRows(real);
     if (added > 0) {
       rehydrateReplyQuotesInDom(roomMessagesEl);
       resolveMissingReplies(roomMessagesEl);
+      reclassifyOwnership();
+      if (translateOn) translateViewport();
     }
-    if (rows.length < OLDER_PAGE) allOlderLoaded = true;
-    if (added === 0) allOlderLoaded = true;
+    if (rows.length < OLDER_PAGE || !isFinite(minTs) || (prevOldest && oldestLoadedTs >= prevOldest) || (clearedAt && minTs <= clearedAt)) {
+      allOlderLoaded = true;
+    }
     olderFailures = 0;
   } catch (e) {
     console.error("load-older", e);
@@ -6385,7 +6398,7 @@ async function loadOlder() {
     } else if (scrollTop != null) {
       scrollCtnEl.scrollTop = scrollTop;
     }
-    if (scrollCtnEl.scrollTop < 150) scrollCtnEl.scrollTop = 150;
+    if (added > 0 && scrollCtnEl.scrollTop < 16) scrollCtnEl.scrollTop = 16;
     loadingOlder = false;
   }
 }
@@ -6423,25 +6436,33 @@ async function loadHistoryCore() {
     }
     // 2) the newest page (covers unread too). Render whichever set spans further back in time
     //    so the DOM stays in chronological order (oldest at top, newest at bottom).
-    const latest = await sbFetchOlder(null, 40);
+    const latest = await sbFetchOlder(null, INITIAL_HISTORY_PAGE);
     if (latest.length) {
       const realLatest = latest.filter(rowDomWorth).reverse();
       const real = unread.length > realLatest.length ? unread : realLatest;
       renderRowsInto(real);
-      const firstTs = real.map(rowTs).filter((t) => t > 0);
+      const spanRows = unread.length > realLatest.length ? unread : latest;
+      const firstTs = spanRows.map(rowTs).filter((t) => t > 0);
       if (!firstTs.length) { allOlderLoaded = true; }
       else oldestLoadedTs = Math.min.apply(null, firstTs);
+      if (latest.length < INITIAL_HISTORY_PAGE && unread.length <= realLatest.length) {
+        allOlderLoaded = true;
+      }
       let totalRendered = roomMessagesEl.querySelectorAll(".msg").length;
-      while (!allOlderLoaded && totalRendered < 40 && oldestLoadedTs) {
-        const need = 40 - totalRendered;
+      while (!allOlderLoaded && totalRendered < INITIAL_HISTORY_PAGE && oldestLoadedTs) {
+        const prevOldest = oldestLoadedTs;
+        const need = Math.max(40, INITIAL_HISTORY_PAGE - totalRendered);
         const more = await sbFetchOlder(oldestLoadedTs, need);
         if (!more.length) { allOlderLoaded = true; break; }
+        const moreMinTs = Math.min.apply(null, more.map(rowTs).filter((t) => t > 0));
+        if (isFinite(moreMinTs)) oldestLoadedTs = Math.min(oldestLoadedTs, moreMinTs);
         const realMore = more.filter(rowDomWorth).reverse();
-        if (!realMore.length) { allOlderLoaded = true; break; }
-        const added = renderRowsInto(realMore);
+        if (realMore.length) prependRows(realMore);
         totalRendered = roomMessagesEl.querySelectorAll(".msg").length;
-        oldestLoadedTs = Math.min(oldestLoadedTs, ...realMore.map(rowTs));
-        if (added === 0 || more.length < need) { allOlderLoaded = true; break; }
+        if (more.length < need || !isFinite(moreMinTs) || oldestLoadedTs >= prevOldest || (clearedAt && moreMinTs <= clearedAt)) {
+          allOlderLoaded = true;
+          break;
+        }
       }
     } else {
       allOlderLoaded = true;
@@ -6766,7 +6787,9 @@ try { localStorage.removeItem("tgGeo_" + (window.generatorName || "chat")); } ca
 let historyLoaded = false;
 let historyLoading = false;
 let historyBuffer = [];
-const OLDER_PAGE = 25;
+const INITIAL_HISTORY_PAGE = 150;
+const OLDER_PAGE = 100;
+const OLDER_TRIGGER_PX = 480;
 const olderLoader = document.getElementById("olderLoader");
 let loadingOlder = false;
 let allOlderLoaded = false;
