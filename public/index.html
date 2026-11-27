@@ -328,6 +328,43 @@
     </div>
   </section>
 
+  <nav id="bottomMenu" class="hide" aria-label="Bottom navigation">
+    <button type="button" class="bmBtn active" id="bmChatsBtn" data-tab="chats" aria-label="Chats">
+      <span class="bmIconWrap">
+        <svg viewBox="0 0 24 24" width="23" height="23" fill="currentColor" aria-hidden="true">
+          <path d="M9.5 3.5C5.36 3.5 2 6.46 2 10.12c0 1.88.89 3.57 2.33 4.78-.12.95-.55 2.02-1.18 2.86-.16.21.02.5.28.45 1.46-.27 2.86-.86 3.84-1.5.7.21 1.45.32 2.23.32 4.14 0 7.5-2.96 7.5-6.62S13.64 3.5 9.5 3.5z"/>
+          <path d="M18.65 9.6c-.18 0-.36.01-.53.03.11.48.18.98.18 1.49 0 4.02-3.57 7.34-8.1 7.6.93.99 2.35 1.63 3.95 1.63.62 0 1.22-.09 1.77-.26.79.52 1.9.98 3.06 1.2.21.04.36-.19.23-.36-.5-.67-.85-1.52-.95-2.29 1.15-.97 1.89-2.33 1.89-3.84 0-2.87-2.66-5.2-5.5-5.2z" opacity="0.82"/>
+        </svg>
+        <span id="bmChatsBadge" class="bmBadge hide">0</span>
+      </span>
+      <span class="bmLabel">Chats</span>
+    </button>
+    <button type="button" class="bmBtn" id="bmSettingsBtn" data-tab="settings" aria-label="Settings">
+      <span class="bmIconWrap">
+        <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3.2"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 .92-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51.92H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </span>
+      <span class="bmLabel">Settings</span>
+    </button>
+    <button type="button" class="bmBtn" id="bmSearchBtn" data-tab="search" aria-label="Search">
+      <span class="bmIconWrap">
+        <svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"/>
+          <path d="M16.5 16.5L21 21"/>
+        </svg>
+      </span>
+      <span class="bmLabel">Search</span>
+    </button>
+    <button type="button" class="bmBtn" id="bmProfileBtn" data-tab="profile" aria-label="Edit profile">
+      <span class="bmIconWrap">
+        <span id="bmAvatar" class="bmAvatar">?</span>
+      </span>
+      <span class="bmLabel">Profile</span>
+    </button>
+  </nav>
+
   <div id="nickModal" class="modal hide">
     <div class="card profileCard">
       <div class="cardTitle">Edit profile</div>

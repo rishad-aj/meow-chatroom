@@ -416,6 +416,8 @@ function refreshAvatars() {
       if (ids.length) fillReactionWho(rxWhoPill, ids);
     }
   } catch (e) {}
+  if (typeof syncSettingsPage === "function") syncSettingsPage();
+  if (typeof syncBottomMenu === "function") syncBottomMenu();
 }
 
 const pfpPreview = document.getElementById("pfpPreview");
@@ -849,6 +851,7 @@ function syncChatPromo() {
   if (!chatListPromo) return;
   const hasPhoto = !!(myName && pfpFor(myName));
   chatListPromo.classList.toggle("hide", chatPromoDismissed || hasPhoto);
+  if (typeof syncBottomMenu === "function") syncBottomMenu();
 }
 if (chatPromoClose) {
   chatPromoClose.addEventListener("click", (e) => {
@@ -921,6 +924,7 @@ function setPeopleScreenVisible(v) {
   const show = !!v || isDesk();
   peopleScreen.classList.toggle("hide", !show);
   appHost.classList.toggle("peopleMode", !!v && !isDesk());
+  if (typeof syncBottomMenu === "function") syncBottomMenu();
 }
 
 function startPeopleTimer() { clearInterval(peopleTimer); peopleTimer = setInterval(refreshPeople, 12000); }
@@ -973,6 +977,7 @@ function updateFolderBadges() {
   const c2 = setFolderBadge(cfBadgePrivate, privateNotif);
   const c3 = setFolderBadge(cfBadgeRoom, roomNotif);
   if (c1 || c2 || c3) requestAnimationFrame(() => syncFolderIndicator(false));
+  if (typeof syncBottomMenu === "function") syncBottomMenu();
 }
 function updateBackBadge() {
   const dmN = dmAllowed() ? dmUnreadTotal() : 0;
@@ -1864,6 +1869,7 @@ function applyLayoutMode() {
   refreshListView();
   if (typeof syncVisualViewport === "function") syncVisualViewport();
   requestAnimationFrame(() => syncFolderIndicator(false));
+  if (typeof syncBottomMenu === "function") syncBottomMenu();
 }
 deskMQ.addEventListener("change", applyLayoutMode);
 
@@ -9936,13 +9942,17 @@ function openSettingsPage() {
   textSizePop.classList.add("hide");
   syncSettingsPage();
   settingsPage.classList.remove("hide");
+  appHost.classList.add("settingsOpen");
   const sc = document.getElementById("settingsScroll");
   if (sc) sc.scrollTop = 0;
+  syncBottomMenu();
 }
 
 function closeSettingsPage() {
   if (!settingsPage) return;
   settingsPage.classList.add("hide");
+  appHost.classList.remove("settingsOpen");
+  syncBottomMenu();
 }
 
 if (settingsItem) {
@@ -10044,6 +10054,122 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* ---------- floating 4-icon bottom menu ---------- */
+const bottomMenu = document.getElementById("bottomMenu");
+const bmChatsBtn = document.getElementById("bmChatsBtn");
+const bmChatsBadge = document.getElementById("bmChatsBadge");
+const bmSettingsBtn = document.getElementById("bmSettingsBtn");
+const bmSearchBtn = document.getElementById("bmSearchBtn");
+const bmProfileBtn = document.getElementById("bmProfileBtn");
+const bmAvatar = document.getElementById("bmAvatar");
+
+var bottomMenuReady = false;
+function syncBottomMenu() {
+  if (!bottomMenuReady || !bottomMenu) return;
+  const settingsOn = !!(settingsPage && !settingsPage.classList.contains("hide"));
+  const visible = settingsOn || isDesk() || peopleOpen;
+  bottomMenu.classList.toggle("hide", !visible);
+  appHost.classList.toggle("settingsOpen", settingsOn);
+
+  // Unread badge on Chats icon
+  if (bmChatsBadge) {
+    const total = roomUnreadTotal() + (dmAllowed() ? dmUnreadTotal() : 0);
+    bmChatsBadge.textContent = total > 99 ? "99+" : String(total);
+    bmChatsBadge.classList.toggle("hide", total <= 0);
+  }
+
+  // Own profile avatar on Profile icon
+  if (bmAvatar) {
+    const name = myName || savedNick || "";
+    const url = name ? pfpFor(name) : "";
+    const key = (name || "") + "|" + (url || "");
+    if (bmAvatar.dataset.k !== key) {
+      bmAvatar.dataset.k = key;
+      bmAvatar.textContent = "";
+      bmAvatar.style.background = "";
+      if (url) {
+        const img = document.createElement("img");
+        img.className = "avImg";
+        img.alt = "";
+        img.src = url;
+        img.addEventListener("error", () => {
+          img.remove();
+          bmAvatar.textContent = senderInitial(name) || "?";
+          bmAvatar.style.background = name ? avatarBg(name) : "";
+        }, { once: true });
+        bmAvatar.appendChild(img);
+      } else {
+        bmAvatar.textContent = senderInitial(name) || "?";
+        bmAvatar.style.background = name ? avatarBg(name) : "";
+      }
+    }
+  }
+
+  // Active tab state (mutually exclusive)
+  const profileActive = !!(nickModal && !nickModal.classList.contains("hide"));
+  const searchActive = !settingsOn && !!(peopleSearchInput && (document.activeElement === peopleSearchInput || peopleSearchInput.value.trim()));
+  const activeTab = profileActive ? "profile" : (settingsOn ? "settings" : (searchActive ? "search" : "chats"));
+  if (bmChatsBtn) bmChatsBtn.classList.toggle("active", activeTab === "chats");
+  if (bmSettingsBtn) bmSettingsBtn.classList.toggle("active", activeTab === "settings");
+  if (bmSearchBtn) bmSearchBtn.classList.toggle("active", activeTab === "search");
+  if (bmProfileBtn) bmProfileBtn.classList.toggle("active", activeTab === "profile");
+}
+
+if (bmChatsBtn) {
+  bmChatsBtn.addEventListener("click", () => {
+    if (settingsPage && !settingsPage.classList.contains("hide")) closeSettingsPage();
+    if (peopleSearchInput) {
+      const hadVal = !!peopleSearchInput.value;
+      peopleSearchInput.value = "";
+      filterUserTyped = false;
+      peopleSearchInput.readOnly = true;
+      if (document.activeElement === peopleSearchInput) peopleSearchInput.blur();
+      if (hadVal) renderPeopleList();
+    }
+    if (!isDesk() && !peopleOpen) openPeople();
+    const ps = document.getElementById("peopleScroll");
+    if (ps) ps.scrollTo({ top: 0, behavior: "smooth" });
+    syncBottomMenu();
+  });
+}
+
+if (bmSettingsBtn) {
+  bmSettingsBtn.addEventListener("click", () => {
+    openSettingsPage();
+  });
+}
+
+if (bmSearchBtn) {
+  bmSearchBtn.addEventListener("click", () => {
+    if (settingsPage && !settingsPage.classList.contains("hide")) closeSettingsPage();
+    if (!isDesk() && !peopleOpen) openPeople();
+    const ps = document.getElementById("peopleScroll");
+    if (ps) ps.scrollTop = 0;
+    if (peopleSearchInput) {
+      peopleSearchInput.readOnly = false;
+      filterUserTyped = true;
+      peopleSearchInput.focus();
+      if (peopleSearchInput.value) peopleSearchInput.select();
+    }
+    syncBottomMenu();
+  });
+}
+
+if (bmProfileBtn) {
+  bmProfileBtn.addEventListener("click", () => {
+    if (nickItem) nickItem.click();
+    syncBottomMenu();
+  });
+}
+
+if (peopleSearchInput) {
+  peopleSearchInput.addEventListener("focus", () => syncBottomMenu());
+  peopleSearchInput.addEventListener("blur", () => setTimeout(syncBottomMenu, 60));
+  peopleSearchInput.addEventListener("input", () => syncBottomMenu());
+}
+if (nickCancelBtn) nickCancelBtn.addEventListener("click", () => setTimeout(syncBottomMenu, 30));
+if (nickOkBtn) nickOkBtn.addEventListener("click", () => setTimeout(syncBottomMenu, 380));
+
 function onChatAreaClick(e) {
   const m = e.target && e.target.closest ? e.target.closest(".mention") : null;
   if (m && m.dataset.mention) {
@@ -10058,7 +10184,9 @@ dmMessagesEl.addEventListener("click", onChatAreaClick);
 // so the first layout/list pass is safe to run (and it decides which layout the
 // page starts in - phone-style or the desktop two-column one). It lives down
 // here rather than next to its own definition for exactly that reason.
-applyLayoutMode();
 settingsReady = true;
+bottomMenuReady = true;
+applyLayoutMode();
 syncSettingsPage();
+syncBottomMenu();
 
