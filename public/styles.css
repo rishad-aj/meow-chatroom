@@ -4081,3 +4081,317 @@ body.dark .msg.out .tsrow .dmSeenTick:not(.seen) svg { color: #b0a2e4; }
   .rxBarBtn { width: 34px; height: 34px; font-size: 20px; }
   .rxBarBtn.rxPlus { width: 34px; }
 }
+
+/* ---------- separate settings page ---------- */
+#tacModal.viewOnly #tacAgreeNote { display: none; }
+
+#settingsPage {
+  position: fixed;
+  inset: 0;
+  z-index: 72;
+  display: flex;
+  flex-direction: column;
+  background: #f2f4f7;
+  color: #111;
+  animation: settingsPageIn 0.18s ease-out;
+}
+#settingsPage.hide { display: none !important; }
+@keyframes settingsPageIn {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+#settingsHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: calc(56px + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0px) 14px 0 8px;
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  flex-shrink: 0;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.setBackBtn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #2678b6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+.setBackBtn:hover { background: rgba(38, 120, 182, 0.1); }
+#settingsTitle {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #111;
+}
+#settingsScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+#settingsInner {
+  max-width: 600px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 16px 14px calc(32px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+}
+.setProfileCard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  background: #ffffff;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(16, 35, 47, 0.06);
+  transition: background 0.14s ease, transform 0.12s ease;
+}
+.setProfileCard:hover { background: #f8fafc; }
+.setProfileCard:active { transform: scale(0.992); }
+.setAvatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #2678b6;
+  color: #fff;
+  font-size: 21px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+  text-transform: uppercase;
+}
+.setAvatar .avImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.setProfileInfo {
+  flex: 1;
+  min-width: 0;
+}
+.setUserName {
+  font-size: 16.5px;
+  font-weight: 700;
+  color: #111;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.setUserSub {
+  font-size: 13px;
+  color: #707579;
+  margin-top: 2px;
+}
+.setSectionLabel {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  padding: 8px 6px 2px;
+}
+.setCard {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(16, 35, 47, 0.05);
+}
+.setRow {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 13px 16px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  box-sizing: border-box;
+  position: relative;
+}
+.setRow + .setRow::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 52px;
+  right: 16px;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.06);
+}
+.setBtnRow {
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+.setBtnRow:hover { background: #f5f7fa; }
+.setBtnRow:active { background: #ebf0f5; }
+.setRow.hide { display: none !important; }
+.setRowCol {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.setRowTop {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+.setIco {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(38, 120, 182, 0.1);
+  color: #2678b6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.setRowText {
+  flex: 1;
+  min-width: 0;
+}
+.setRowTitle {
+  font-size: 15px;
+  font-weight: 500;
+  color: #111;
+  line-height: 1.25;
+}
+.setRowSub {
+  font-size: 12.5px;
+  color: #707579;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+.setChevron {
+  color: #9aa0a6;
+  flex-shrink: 0;
+}
+.setRow.danger .setIco {
+  background: rgba(229, 57, 53, 0.11);
+  color: #e53935;
+}
+.setRow.danger .setRowTitle {
+  color: #e53935;
+}
+.setSeg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding-left: 47px;
+}
+.setSeg button {
+  padding: 8px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.09);
+  background: #f5f7fa;
+  color: #222;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+.setSeg button:hover { background: #e9eff5; }
+.setSeg button.active {
+  background: #2678b6;
+  border-color: #2678b6;
+  color: #fff;
+}
+.setSelect {
+  max-width: 156px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #f5f7fa;
+  color: #111;
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+}
+.setSelect:focus { border-color: #2678b6; }
+
+body.dark #settingsPage {
+  background: #141416;
+  color: #f5f5f7;
+}
+body.dark #settingsHead {
+  background: rgba(31, 31, 33, 0.96);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+body.dark .setBackBtn { color: #a08ef9; }
+body.dark .setBackBtn:hover { background: rgba(135, 116, 225, 0.16); }
+body.dark #settingsTitle { color: #f5f5f7; }
+body.dark .setProfileCard,
+body.dark .setCard {
+  background: #1f1f21;
+  border-color: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+body.dark .setProfileCard:hover,
+body.dark .setBtnRow:hover { background: #27272a; }
+body.dark .setBtnRow:active { background: #2f2f34; }
+body.dark .setUserName,
+body.dark .setRowTitle { color: #f5f5f7; }
+body.dark .setUserSub,
+body.dark .setRowSub,
+body.dark .setSectionLabel { color: #9aa0a8; }
+body.dark .setRow + .setRow::before { background: rgba(255, 255, 255, 0.07); }
+body.dark .setIco {
+  background: rgba(135, 116, 225, 0.18);
+  color: #b7a8ff;
+}
+body.dark .setRow.danger .setIco {
+  background: rgba(255, 107, 107, 0.15);
+  color: #ff6b6b;
+}
+body.dark .setRow.danger .setRowTitle { color: #ff6b6b; }
+body.dark .setChevron { color: #7c818a; }
+body.dark .setSeg button {
+  background: #2a2a2e;
+  border-color: rgba(255, 255, 255, 0.09);
+  color: #e5e5ea;
+}
+body.dark .setSeg button:hover { background: #34343a; }
+body.dark .setSeg button.active {
+  background: #8774e1;
+  border-color: #8774e1;
+  color: #fff;
+}
+body.dark .setSelect {
+  background: #2a2a2e;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #f5f5f7;
+}
+body.dark .setSelect:focus { border-color: #8774e1; }
+@media (max-width: 480px) {
+  .setSeg { padding-left: 0; }
+}

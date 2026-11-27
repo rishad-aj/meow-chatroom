@@ -289,9 +289,11 @@ const delModal = document.getElementById("delModal");
 const delOkBtn = document.getElementById("delOkBtn");
 const delCancelBtn = document.getElementById("delCancelBtn");
 const bannedModal = document.getElementById("bannedModal");
-const bannedOkBtn = document.getElementById("bannedOkBtn");const tacModal = document.getElementById("tacModal");
+const bannedOkBtn = document.getElementById("bannedOkBtn");
+const tacModal = document.getElementById("tacModal");
 const tacAgreeBtn = document.getElementById("tacAgreeBtn");
 const tacDeclineBtn = document.getElementById("tacDeclineBtn");
+const tacCloseBtn = document.getElementById("tacCloseBtn");
 const tacKey = "tgTac_" + (window.generatorName || "chat");
 let tacAgreed = lsGet(tacKey) === "1";
 const replyBar = document.getElementById("replyBar");
@@ -2396,15 +2398,36 @@ plogoutOkBtn.addEventListener("click", () => {
   pendingProtectedName = "";
 });
 
+function openTermsModal(viewOnly) {
+  const ro = !!viewOnly;
+  tacModal.classList.toggle("viewOnly", ro);
+  tacAgreeBtn.classList.toggle("hide", ro);
+  tacDeclineBtn.classList.toggle("hide", ro);
+  if (tacCloseBtn) tacCloseBtn.classList.toggle("hide", !ro);
+  tacModal.classList.remove("hide");
+}
 tacAgreeBtn.addEventListener("click", () => {
   tacAgreed = true;
   lsSet(tacKey, "1");
   tacModal.classList.add("hide");
+  tacModal.classList.remove("viewOnly");
   updateGate();
   showNextOnboarding();
 });
 tacDeclineBtn.addEventListener("click", () => {
   toast("You must accept the terms and conditions to use this chat");
+});
+if (tacCloseBtn) {
+  tacCloseBtn.addEventListener("click", () => {
+    tacModal.classList.add("hide");
+    tacModal.classList.remove("viewOnly");
+  });
+}
+tacModal.addEventListener("click", (e) => {
+  if (e.target === tacModal && tacModal.classList.contains("viewOnly")) {
+    tacModal.classList.add("hide");
+    tacModal.classList.remove("viewOnly");
+  }
 });
 
 const soundKey = "tgSound_" + (window.generatorName || "chat");
@@ -2440,6 +2463,7 @@ function playNotify() {
 function updateSoundItem() {
   const label = soundItem.querySelector(".popLabel");
   if (label) label.textContent = "Sound & notifications: " + (soundOn ? "On" : "Off");
+  if (typeof syncSettingsPage === "function") syncSettingsPage();
 }
 updateSoundItem();
 const notifyKey = "tgNotify_" + (window.generatorName || "chat");
@@ -2548,6 +2572,7 @@ function applyTextSize() {
   for (const b of textSizePop.querySelectorAll(".tsizeGrid button")) {
     b.classList.toggle("active", b.dataset.size === textSize);
   }
+  if (typeof syncSettingsPage === "function") syncSettingsPage();
 }
 textSizeItem.addEventListener("click", (e) => {
   e.stopPropagation();
@@ -2602,6 +2627,7 @@ function applyTheme() {
   if (thl) thl.textContent = "Theme: " + (dark ? "Dark" : "Light");
   const tc = document.querySelector('meta[name="theme-color"]');
   if (tc) tc.content = dark ? "#1f1f21" : "#ffffff";
+  if (typeof syncSettingsPage === "function") syncSettingsPage();
 }
 themeItem.addEventListener("click", () => {
   menuPop.classList.add("hide");
@@ -2627,6 +2653,7 @@ const tpopToggle = document.getElementById("tpopToggle");
 const tpopGrid = translatePop.querySelector(".tpopGrid");
 function renderTpopToggle() {
   tpopToggle.classList.toggle("on", translateOn);
+  if (typeof syncSettingsPage === "function") syncSettingsPage();
 }
 function renderTpopGrid() {
   tpopGrid.textContent = "";
@@ -9790,7 +9817,7 @@ msgInput.addEventListener("input", () => {
 window.addEventListener("resize", () => { if (firstMsgGuide.classList.contains("show")) positionFirstMsgGuide(); });
 
 function showNextOnboarding() {
-  if (!tacAgreed) { tacModal.classList.remove("hide"); return; }
+  if (!tacAgreed) { openTermsModal(false); return; }
   if (!ageApproved) { ageModal.classList.remove("hide"); return; }
   if (!savedNick && !savedNickApplied) { forceNick(); return; }
 }
@@ -9824,6 +9851,199 @@ ageNoBtn.addEventListener("click", () => {
   ageNoBtn.textContent = "OK";
 });
 
+/* ---------- separate settings page ---------- */
+const settingsItem = document.getElementById("settingsItem");
+const settingsPage = document.getElementById("settingsPage");
+const settingsBackBtn = document.getElementById("settingsBackBtn");
+const setProfileCard = document.getElementById("setProfileCard");
+const setAvatar = document.getElementById("setAvatar");
+const setUserName = document.getElementById("setUserName");
+const setUserSub = document.getElementById("setUserSub");
+const setThemeRow = document.getElementById("setThemeRow");
+const setThemeSub = document.getElementById("setThemeSub");
+const setThemeToggle = document.getElementById("setThemeToggle");
+const setSoundRow = document.getElementById("setSoundRow");
+const setSoundSub = document.getElementById("setSoundSub");
+const setSoundToggle = document.getElementById("setSoundToggle");
+const setTextSizeSeg = document.getElementById("setTextSizeSeg");
+const setTransRow = document.getElementById("setTransRow");
+const setTransSub = document.getElementById("setTransSub");
+const setTransToggle = document.getElementById("setTransToggle");
+const setLangSelect = document.getElementById("setLangSelect");
+const setEditProfileBtn = document.getElementById("setEditProfileBtn");
+const setChangePassBtn = document.getElementById("setChangePassBtn");
+const setInstallBtn = document.getElementById("setInstallBtn");
+const setAdminBtn = document.getElementById("setAdminBtn");
+const setShowTermsBtn = document.getElementById("setShowTermsBtn");
+const setClearChatBtn = document.getElementById("setClearChatBtn");
+
+if (setLangSelect && !setLangSelect.options.length) {
+  for (const [code, label] of LANG_LIST) {
+    const opt = document.createElement("option");
+    opt.value = code;
+    opt.textContent = label;
+    setLangSelect.appendChild(opt);
+  }
+}
+
+var settingsReady = false;
+function syncSettingsPage() {
+  if (!settingsReady || !settingsPage) return;
+  const name = myName || savedNick || "";
+  if (setUserName) setUserName.textContent = name || "Guest";
+  if (setUserSub) setUserSub.textContent = name ? "Tap to edit profile & photo" : "Set a username and photo";
+  if (setAvatar) {
+    const url = name ? pfpFor(name) : "";
+    setAvatar.textContent = "";
+    setAvatar.style.background = "";
+    if (url) {
+      const img = document.createElement("img");
+      img.className = "avImg";
+      img.alt = "";
+      img.src = url;
+      img.addEventListener("error", () => {
+        img.remove();
+        setAvatar.textContent = senderInitial(name) || "?";
+        setAvatar.style.background = name ? avatarBg(name) : "";
+      }, { once: true });
+      setAvatar.appendChild(img);
+    } else {
+      setAvatar.textContent = senderInitial(name) || "?";
+      setAvatar.style.background = name ? avatarBg(name) : "";
+    }
+  }
+  const dark = effectiveDark();
+  if (setThemeToggle) setThemeToggle.classList.toggle("on", dark);
+  if (setThemeSub) setThemeSub.textContent = dark ? "Dark" : "Light";
+  if (setSoundToggle) setSoundToggle.classList.toggle("on", soundOn);
+  if (setSoundSub) setSoundSub.textContent = soundOn ? (notifyOn ? "Sound & notifications on" : "Sound on") : "Off";
+  if (setTextSizeSeg) {
+    for (const b of setTextSizeSeg.querySelectorAll("button")) {
+      b.classList.toggle("active", b.dataset.size === textSize);
+    }
+  }
+  if (setTransToggle) setTransToggle.classList.toggle("on", translateOn);
+  if (setTransSub) setTransSub.textContent = translateOn ? "On" : "Off";
+  if (setLangSelect) setLangSelect.value = translateLang;
+  if (setChangePassBtn) setChangePassBtn.classList.toggle("hide", !myName);
+  if (setAdminBtn) setAdminBtn.classList.toggle("hide", !isAdmin());
+}
+
+function openSettingsPage() {
+  if (!settingsPage) return;
+  menuPop.classList.add("hide");
+  translatePop.classList.add("hide");
+  textSizePop.classList.add("hide");
+  syncSettingsPage();
+  settingsPage.classList.remove("hide");
+  const sc = document.getElementById("settingsScroll");
+  if (sc) sc.scrollTop = 0;
+}
+
+function closeSettingsPage() {
+  if (!settingsPage) return;
+  settingsPage.classList.add("hide");
+}
+
+if (settingsItem) {
+  settingsItem.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openSettingsPage();
+  });
+}
+if (settingsBackBtn) {
+  settingsBackBtn.addEventListener("click", () => closeSettingsPage());
+}
+if (setProfileCard) {
+  setProfileCard.addEventListener("click", () => nickItem.click());
+}
+if (setEditProfileBtn) {
+  setEditProfileBtn.addEventListener("click", () => nickItem.click());
+}
+if (setThemeToggle) {
+  setThemeToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    themeItem.click();
+  });
+}
+if (setThemeRow) {
+  setThemeRow.addEventListener("click", () => themeItem.click());
+}
+if (setSoundToggle) {
+  setSoundToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    soundItem.click();
+  });
+}
+if (setSoundRow) {
+  setSoundRow.addEventListener("click", () => soundItem.click());
+}
+if (setTextSizeSeg) {
+  setTextSizeSeg.querySelectorAll("button").forEach((b) => {
+    b.addEventListener("click", () => {
+      textSize = b.dataset.size;
+      lsSet(textSizeKey, textSize);
+      applyTextSize();
+    });
+  });
+}
+const toggleTranslateFromSettings = () => {
+  translateOn = !translateOn;
+  lsSet(translateKey, translateOn ? "on" : "off");
+  renderTpopToggle();
+  if (translateOn) retranslateAll();
+  else restoreAllOriginal();
+};
+if (setTransToggle) {
+  setTransToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleTranslateFromSettings();
+  });
+}
+if (setTransRow) {
+  setTransRow.addEventListener("click", () => toggleTranslateFromSettings());
+}
+if (setLangSelect) {
+  setLangSelect.addEventListener("change", () => {
+    translateLang = setLangSelect.value || "en";
+    lsSet(langKey, translateLang);
+    renderTpopGrid();
+    if (translateOn) retranslateAll();
+  });
+}
+if (setChangePassBtn && changePassBtn) {
+  setChangePassBtn.addEventListener("click", () => changePassBtn.click());
+}
+if (setInstallBtn && installItem) {
+  setInstallBtn.addEventListener("click", () => installItem.click());
+}
+if (setAdminBtn && adminItem) {
+  setAdminBtn.addEventListener("click", () => adminItem.click());
+}
+if (setShowTermsBtn) {
+  setShowTermsBtn.addEventListener("click", () => openTermsModal(true));
+}
+if (setClearChatBtn && clearItem) {
+  setClearChatBtn.addEventListener("click", () => clearItem.click());
+}
+if (nickOkBtn) {
+  nickOkBtn.addEventListener("click", () => {
+    setTimeout(syncSettingsPage, 350);
+  });
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!tacModal.classList.contains("hide") && tacModal.classList.contains("viewOnly")) {
+    tacModal.classList.add("hide");
+    tacModal.classList.remove("viewOnly");
+    return;
+  }
+  if (settingsPage && !settingsPage.classList.contains("hide")) {
+    const anyModalOpen = !!document.querySelector(".modal:not(.hide)");
+    if (!anyModalOpen) closeSettingsPage();
+  }
+});
+
 function onChatAreaClick(e) {
   const m = e.target && e.target.closest ? e.target.closest(".mention") : null;
   if (m && m.dataset.mention) {
@@ -9839,4 +10059,6 @@ dmMessagesEl.addEventListener("click", onChatAreaClick);
 // page starts in - phone-style or the desktop two-column one). It lives down
 // here rather than next to its own definition for exactly that reason.
 applyLayoutMode();
+settingsReady = true;
+syncSettingsPage();
 
