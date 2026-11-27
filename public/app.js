@@ -9892,6 +9892,30 @@ if (setLangSelect && !setLangSelect.options.length) {
   }
 }
 
+// Paint Settings row icons with the exact same PFP glossBg / NAME_COLORS logic.
+if (settingsPage) {
+  const iconColors = {
+    setThemeRow: NAME_COLORS[1],       // warm orange
+    setSoundRow: NAME_COLORS[0],       // coral red
+    setTransRow: NAME_COLORS[2],       // purple
+    setLangRow: NAME_COLORS[5],        // sky blue
+    setEditProfileBtn: NAME_COLORS[5], // sky blue
+    setChangePassBtn: "#8b95a5",       // slate
+    setInstallBtn: NAME_COLORS[3],     // green
+    setAdminBtn: NAME_COLORS[7],       // gold
+    setShowTermsBtn: NAME_COLORS[6],   // rose pink
+    setClearChatBtn: "#e5484d"         // danger red
+  };
+  for (const row of settingsPage.querySelectorAll(".setRow")) {
+    const ico = row.querySelector(".setIco");
+    if (!ico) continue;
+    const hex = (row.id && iconColors[row.id])
+      ? iconColors[row.id]
+      : (row.querySelector("#setTextSizeSeg") ? NAME_COLORS[4] : nameColor((row.querySelector(".setRowTitle") || {}).textContent || ""));
+    ico.style.background = glossBg(hex);
+  }
+}
+
 var settingsReady = false;
 function syncSettingsPage() {
   if (!settingsReady || !settingsPage) return;
