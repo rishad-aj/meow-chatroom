@@ -2626,11 +2626,15 @@ function effectiveDark() {
   if (themeOverride === "dark" || themeOverride === "light") return themeOverride === "dark";
   return sysDark.matches;
 }
+const SUN_SVG_PATHS = '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M2.5 12h2M19.5 12h2M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>';
+const MOON_SVG_PATHS = '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/>';
 function applyTheme() {
   const dark = effectiveDark();
   document.body.classList.toggle("dark", dark);
   const thl = themeItem.querySelector(".popLabel");
   if (thl) thl.textContent = "Theme: " + (dark ? "Dark" : "Light");
+  const thSvg = themeItem.querySelector("svg");
+  if (thSvg) thSvg.innerHTML = dark ? MOON_SVG_PATHS : SUN_SVG_PATHS;
   const tc = document.querySelector('meta[name="theme-color"]');
   if (tc) tc.content = dark ? "#1f1f21" : "#ffffff";
   if (typeof syncSettingsPage === "function") syncSettingsPage();
@@ -9945,6 +9949,8 @@ function syncSettingsPage() {
   const dark = effectiveDark();
   if (setThemeToggle) setThemeToggle.classList.toggle("on", dark);
   if (setThemeSub) setThemeSub.textContent = dark ? "Dark" : "Light";
+  const setThemeIcoSvg = document.querySelector("#setThemeIco svg");
+  if (setThemeIcoSvg) setThemeIcoSvg.innerHTML = dark ? MOON_SVG_PATHS : SUN_SVG_PATHS;
   if (setSoundToggle) setSoundToggle.classList.toggle("on", soundOn);
   if (setSoundSub) setSoundSub.textContent = soundOn ? (notifyOn ? "Sound & notifications on" : "Sound on") : "Off";
   if (setTextSizeSeg) {

@@ -17,7 +17,7 @@ body {
   overflow: hidden;
 }
 button, input, textarea, select { font-family: var(--font-sans); }
-#avatar, #avatarLetter, .pAvatar, .msgAvatar, .olAvatar, .mAv, .rxWhoAva, .pfpPreview {
+#avatar, #avatarLetter, .pAvatar, .msgAvatar, .olAvatar, .mAv, .rxWhoAva, .pfpPreview, .setAvatar, .bmAvatar {
   font-family: var(--font-avatar);
 }
 .hide { display: none !important; }
@@ -4184,6 +4184,8 @@ body.dark .msg.out .tsrow .dmSeenTick:not(.seen) svg { color: #b0a2e4; }
   overflow: hidden;
   position: relative;
   text-transform: uppercase;
+  line-height: 1;
+  user-select: none;
 }
 .setAvatar .avImg {
   width: 100%;
@@ -4241,7 +4243,7 @@ body.dark .msg.out .tsrow .dmSeenTick:not(.seen) svg { color: #b0a2e4; }
   content: "";
   position: absolute;
   top: 0;
-  left: 65px;
+  left: 63px;
   right: 16px;
   height: 1px;
   background: rgba(0, 0, 0, 0.06);
@@ -4277,7 +4279,7 @@ body.dark .msg.out .tsrow .dmSeenTick:not(.seen) svg { color: #b0a2e4; }
 }
 .setIco svg {
   display: block;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.12));
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.2));
 }
 .setRowText {
   flex: 1;
@@ -4306,7 +4308,7 @@ body.dark .msg.out .tsrow .dmSeenTick:not(.seen) svg { color: #b0a2e4; }
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
-  padding-left: 49px;
+  padding-left: 47px;
 }
 .setSeg button {
   padding: 8px 6px;
@@ -4459,6 +4461,9 @@ body.dark .setSelect:focus { border-color: #8774e1; }
   justify-content: center;
   flex-shrink: 0;
 }
+.bmIconWrap svg {
+  display: block;
+}
 .bmLabel {
   font-size: 10.5px;
   font-weight: 600;
@@ -4493,6 +4498,8 @@ body.dark .setSelect:focus { border-color: #8774e1; }
   color: #ffffff;
   font-size: 11.5px;
   font-weight: 700;
+  line-height: 1;
+  user-select: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
