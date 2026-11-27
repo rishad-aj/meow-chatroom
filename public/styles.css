@@ -288,6 +288,11 @@ body.dark #pinnedBar #pinUnpinBtn:hover { background: rgba(255, 255, 255, 0.09);
   left: 10px;
   right: auto;
 }
+#menuPop.fromList #clearItem,
+#menuPop.fromList #translateItem,
+#menuPop.fromList #nickItem {
+  display: none;
+}
 @media (min-width: 820px) {
   #menuPop.fromList {
     top: 68px;
