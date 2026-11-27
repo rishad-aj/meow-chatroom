@@ -2286,6 +2286,7 @@ function refreshVerifiedUI() {
   if (!onlineModal.classList.contains("hide")) renderOnlineList();
   // Verification is what grants private chat, and what puts a name in the list.
   pruneDmToVerified();
+  if (typeof syncMenuProfileItem === "function") syncMenuProfileItem();
 }
 function senderNameEl(m, mine, grouped) {
   if (mine || grouped) return null;
@@ -8069,6 +8070,7 @@ if (peopleMenuBtn) {
     e.stopPropagation();
     translatePop.classList.add("hide");
     textSizePop.classList.add("hide");
+    if (typeof syncMenuProfileItem === "function") syncMenuProfileItem();
     const wasFromList = menuPop.classList.contains("fromList");
     menuPop.classList.add("fromList");
     if (!wasFromList && !menuPop.classList.contains("hide")) return;
@@ -10134,6 +10136,7 @@ function syncBottomMenu() {
       }
     }
   }
+  syncMenuProfileItem();
 
   // Active tab state (mutually exclusive)
   const profileActive = !!(nickModal && !nickModal.classList.contains("hide"));
@@ -10189,6 +10192,64 @@ if (bmProfileBtn) {
   bmProfileBtn.addEventListener("click", () => {
     if (nickItem) nickItem.click();
     syncBottomMenu();
+  });
+}
+
+const menuProfileItem = document.getElementById("menuProfileItem");
+const menuProfileAv = document.getElementById("menuProfileAv");
+const menuProfileName = document.getElementById("menuProfileName");
+const menuProfileBadge = document.getElementById("menuProfileBadge");
+
+function syncMenuProfileItem() {
+  if (!bottomMenuReady || !menuProfileItem) return;
+  const name = myName || savedNick || "";
+  if (menuProfileName) menuProfileName.textContent = name || "Guest";
+  if (menuProfileAv) {
+    const url = name ? pfpFor(name) : "";
+    const key = (name || "") + "|" + (url || "");
+    if (menuProfileAv.dataset.k !== key) {
+      menuProfileAv.dataset.k = key;
+      menuProfileAv.textContent = "";
+      menuProfileAv.style.background = "";
+      if (url) {
+        const img = document.createElement("img");
+        img.className = "avImg";
+        img.alt = "";
+        img.src = url;
+        img.addEventListener("error", () => {
+          img.remove();
+          menuProfileAv.textContent = senderInitial(name) || "?";
+          menuProfileAv.style.background = name ? avatarBg(name) : "";
+        }, { once: true });
+        menuProfileAv.appendChild(img);
+      } else {
+        menuProfileAv.textContent = senderInitial(name) || "?";
+        menuProfileAv.style.background = name ? avatarBg(name) : "";
+      }
+    }
+  }
+  if (menuProfileBadge) {
+    const badgeType = name === "admin" ? "admin" : (name && verifiedSet.has(name) ? "verified" : "");
+    if (menuProfileBadge.dataset.b !== badgeType) {
+      menuProfileBadge.dataset.b = badgeType;
+      menuProfileBadge.textContent = "";
+      if (badgeType === "admin") menuProfileBadge.appendChild(adminBadgeEl());
+      else if (badgeType === "verified") menuProfileBadge.appendChild(verifiedBadgeEl());
+    }
+  }
+}
+
+if (menuProfileItem) {
+  menuProfileItem.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (nickItem) nickItem.click();
+    syncBottomMenu();
+  });
+  menuProfileItem.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      menuProfileItem.click();
+    }
   });
 }
 
