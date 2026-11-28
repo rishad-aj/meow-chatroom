@@ -739,8 +739,13 @@ SupaSocket.prototype.send = function (str) {
     self._broad({ t: "typing", from: self._myName, uid: self._myUid || "" });
   } else if (m.t === "sysmsg") {
     if (self._myName !== ADMIN_NAME) return;
-    var txt = String(m.text || "").trim().slice(0, 100);
+    var isPres = m.presence === "join" || m.presence === "left";
+    var txt = String(m.text || "").trim().slice(0, isPres ? 100 : 240);
     if (!txt) return;
+    if (!isPres) {
+      self._broad({ t: "system", text: txt, fake: false, ts: now });
+      return;
+    }
     metaGet("fake", []).then(function (fake) {
       fake = Array.isArray(fake) ? fake : [];
       var nm = txt.replace(/\s+(joined|left)$/, "").trim();
@@ -1183,6 +1188,14 @@ SupaSocket.prototype.rpc.getFakeUsers = function () {
   var self = this;
   if (self._myName !== ADMIN_NAME) return Promise.resolve("admin only");
   return metaGet("fake", []).then(function (f) { return JSON.stringify(Array.isArray(f) ? f : []); });
+};
+SupaSocket.prototype.rpc.clearFakeUsers = function () {
+  var self = this;
+  if (self._myName !== ADMIN_NAME) return Promise.resolve("admin only");
+  return metaSet("fake", []).then(function () {
+    self._presence();
+    return "ok";
+  });
 };
 SupaSocket.prototype.rpc.clearAll = function () {
   var self = this;

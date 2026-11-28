@@ -4013,56 +4013,533 @@ function addAdminActionButtons() {
 const adminSide = document.getElementById("adminSide");
 const adminItem = document.getElementById("adminItem");
 const asCloseBtn = document.getElementById("asCloseBtn");
-function openAdminPanel() {
-  adminSide.classList.remove("hide");
-  if (!asName.value.trim()) asName.value = myName;
-  loadFakeUsers();
-  loadDeletedMessages();
+const asRefreshAllBtn = document.getElementById("asRefreshAllBtn");
+const asLiveSub = document.getElementById("asLiveSub");
+const asTabs = document.getElementById("asTabs");
+const asDelTabCount = document.getElementById("asDelTabCount");
+
+const asStatOnline = document.getElementById("asStatOnline");
+const asStatVerified = document.getElementById("asStatVerified");
+const asStatBanned = document.getElementById("asStatBanned");
+const asStatDeleted = document.getElementById("asStatDeleted");
+
+const asAnnounceInput = document.getElementById("asAnnounceInput");
+const asAnnounceBtn = document.getElementById("asAnnounceBtn");
+const asPinNoticeBtn = document.getElementById("asPinNoticeBtn");
+const asRoomTitleInput = document.getElementById("asRoomTitleInput");
+const asRoomTitleSaveBtn = document.getElementById("asRoomTitleSaveBtn");
+const asRoomIconBtn = document.getElementById("asRoomIconBtn");
+const asPinStatus = document.getElementById("asPinStatus");
+const asUnpinBtn = document.getElementById("asUnpinBtn");
+const asClearRoomBtn = document.getElementById("asClearRoomBtn");
+
+const asModName = document.getElementById("asModName");
+const asModVerifyBtn = document.getElementById("asModVerifyBtn");
+const asModBanBtn = document.getElementById("asModBanBtn");
+const asModUnbanBtn = document.getElementById("asModUnbanBtn");
+const asUserSearch = document.getElementById("asUserSearch");
+const asUserChips = document.getElementById("asUserChips");
+const asUserList = document.getElementById("asUserList");
+
+const asDelList = document.getElementById("asDelList");
+const asDelRefreshBtn = document.getElementById("asDelRefreshBtn");
+const asDelExportBtn = document.getElementById("asDelExportBtn");
+const asDelClearBtn = document.getElementById("asDelClearBtn");
+const asDelSearch = document.getElementById("asDelSearch");
+const asDelFilter = document.getElementById("asDelFilter");
+const asDelMeta = document.getElementById("asDelMeta");
+
+const asName = document.getElementById("asName");
+const asFakeName = document.getElementById("asFakeName");
+const asFakeCreateBtn = document.getElementById("asFakeCreateBtn");
+const asFakeClearAllBtn = document.getElementById("asFakeClearAllBtn");
+const asFakeList = document.getElementById("asFakeList");
+const asFakeSendRow = document.getElementById("asFakeSendRow");
+const asFakeActiveLabel = document.getElementById("asFakeActiveLabel");
+const asFakeMsg = document.getElementById("asFakeMsg");
+const asFakeSendBtn = document.getElementById("asFakeSendBtn");
+
+let asActiveTab = "overview";
+let asUserFilter = "all";
+let asOnlineUsersCache = [];
+let asDeletedCache = [];
+let asDelBackfilled = false;
+let asDelClearArmed = false;
+let asDelClearTimer = null;
+let asClearRoomArmed = false;
+let asClearRoomTimer = null;
+const fakeUsers = new Set();
+let selectedFake = null;
+
+function isSafeAdminMediaUrl(u) {
+  const s = String(u || "").trim();
+  return /^https?:\/\//i.test(s) || (s.startsWith("/") && !s.startsWith("//"));
 }
+
+function setAdminTab(tabName) {
+  asActiveTab = tabName || "overview";
+  if (asTabs) {
+    for (const btn of asTabs.querySelectorAll(".asTab")) {
+      const on = btn.dataset.astab === asActiveTab;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    }
+  }
+  if (adminSide) {
+    for (const pane of adminSide.querySelectorAll(".asPane")) {
+      pane.classList.toggle("active", pane.dataset.aspane === asActiveTab);
+    }
+  }
+  const bodyEl = document.getElementById("asBody");
+  if (bodyEl) bodyEl.scrollTop = 0;
+}
+
+function setAdminUserFilter(filter) {
+  asUserFilter = filter || "all";
+  if (asUserChips) {
+    for (const chip of asUserChips.querySelectorAll(".asChip")) {
+      chip.classList.toggle("active", chip.dataset.asfilter === asUserFilter);
+    }
+  }
+  renderAdminUsers();
+}
+
+function syncAdminOverview() {
+  const onCount = asOnlineUsersCache.filter((u) => u && u.online !== 0).length;
+  if (asStatOnline) asStatOnline.textContent = String(onCount);
+  if (asStatVerified) asStatVerified.textContent = String(verifiedSet.size);
+  if (asStatBanned) asStatBanned.textContent = String(bannedNames.size);
+  if (asStatDeleted) asStatDeleted.textContent = String(asDeletedCache.length);
+  if (asDelTabCount) {
+    asDelTabCount.textContent = asDeletedCache.length > 99 ? "99+" : String(asDeletedCache.length);
+    asDelTabCount.classList.toggle("hide", asDeletedCache.length === 0);
+  }
+  if (asLiveSub) {
+    asLiveSub.textContent = onCount + " online · " + verifiedSet.size + " verified · " + bannedNames.size + " banned";
+  }
+  if (asRoomTitleInput && document.activeElement !== asRoomTitleInput) {
+    asRoomTitleInput.value = chatTitle ? chatTitle.textContent.trim() : "";
+  }
+  if (asPinStatus && asUnpinBtn) {
+    if (pinnedMsg && (pinnedMsg.text || pinnedMsg.url)) {
+      const label = (pinnedMsg.from ? pinnedMsg.from + ": " : "") + pinPreviewText(pinnedMsg);
+      asPinStatus.textContent = label;
+      asUnpinBtn.classList.remove("hide");
+    } else {
+      asPinStatus.textContent = "No message pinned";
+      asUnpinBtn.classList.add("hide");
+    }
+  }
+}
+
+async function loadAdminUsers() {
+  if (!isAdmin() || !socket || socket.readyState !== 1) return;
+  try {
+    const [onRaw, verRaw, banRaw] = await Promise.all([
+      socket.rpc.getOnline("").catch(() => "[]"),
+      socket.rpc.getVerified("").catch(() => null),
+      socket.rpc.getBanned("").catch(() => null)
+    ]);
+    try {
+      const parsed = JSON.parse(onRaw || "[]");
+      asOnlineUsersCache = Array.isArray(parsed) ? parsed : [];
+    } catch (e) { asOnlineUsersCache = []; }
+    if (verRaw != null) {
+      try {
+        const varr = JSON.parse(verRaw);
+        if (Array.isArray(varr)) {
+          verifiedSet.clear();
+          for (const n of varr) verifiedSet.add(n);
+          refreshVerifiedUI();
+        }
+      } catch (e) {}
+    }
+    if (banRaw != null) {
+      try {
+        const barr = JSON.parse(banRaw);
+        if (Array.isArray(barr)) {
+          bannedNames.clear();
+          for (const n of barr) bannedNames.add(n);
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
+  syncAdminOverview();
+  renderAdminUsers();
+}
+
+function renderAdminUsers() {
+  if (!asUserList) return;
+  const q = asUserSearch ? asUserSearch.value.trim().toLowerCase() : "";
+  const map = new Map();
+  const upsert = (name) => {
+    const clean = String(name || "").trim();
+    if (!clean) return null;
+    const key = clean.toLowerCase();
+    let entry = map.get(key);
+    if (!entry) {
+      entry = { name: clean, online: false, verified: false, banned: false, fake: false, isAdminUser: clean.toLowerCase() === "admin" };
+      map.set(key, entry);
+    }
+    return entry;
+  };
+  for (const u of asOnlineUsersCache) {
+    if (!u || !u.name) continue;
+    const e = upsert(u.name);
+    if (e && u.online !== 0) e.online = true;
+  }
+  for (const n of verifiedSet) {
+    const e = upsert(n);
+    if (e) e.verified = true;
+  }
+  for (const n of bannedNames) {
+    const e = upsert(n);
+    if (e) e.banned = true;
+  }
+  for (const n of fakeUsers) {
+    const e = upsert(n);
+    if (e) e.fake = true;
+  }
+  let list = [...map.values()];
+  if (asUserFilter === "online") list = list.filter((u) => u.online);
+  else if (asUserFilter === "verified") list = list.filter((u) => u.verified);
+  else if (asUserFilter === "banned") list = list.filter((u) => u.banned);
+  if (q) list = list.filter((u) => u.name.toLowerCase().includes(q));
+
+  list.sort((a, b) => {
+    if (a.isAdminUser !== b.isAdminUser) return a.isAdminUser ? -1 : 1;
+    if (a.online !== b.online) return a.online ? -1 : 1;
+    if (a.banned !== b.banned) return a.banned ? 1 : -1;
+    return a.name.localeCompare(b.name);
+  });
+
+  asUserList.textContent = "";
+  if (!list.length) {
+    asUserList.appendChild(el("div", "asEmpty", q ? "No users match \"" + q + "\"" : "No users in this view."));
+    return;
+  }
+  for (const u of list) {
+    const row = el("div", "asUserItem");
+    const av = el("span", "asAvatar" + (u.isAdminUser ? " adminAvatar" : ""));
+    paintAvatar(av, u.name);
+    av.removeAttribute("title");
+    row.appendChild(av);
+
+    const main = el("div", "asUserMain");
+    const top = el("div", "asUserTop");
+    top.appendChild(el("span", "asUserName", u.name));
+    if (u.isAdminUser) top.appendChild(adminBadgeEl());
+    else if (u.verified) top.appendChild(verifiedBadgeEl());
+    main.appendChild(top);
+
+    const tags = el("div", "asUserTags");
+    if (u.isAdminUser) tags.appendChild(el("span", "asTag asTagAdmin", "Admin"));
+    if (u.online) tags.appendChild(el("span", "asTag asTagOnline", "Online"));
+    if (u.verified && !u.isAdminUser) tags.appendChild(el("span", "asTag asTagVerified", "Verified"));
+    if (u.banned) tags.appendChild(el("span", "asTag asTagBanned", "Banned"));
+    if (u.fake) tags.appendChild(el("span", "asTag asTagFake", "Fake"));
+    if (tags.childNodes.length) main.appendChild(tags);
+    row.appendChild(main);
+
+    if (!u.isAdminUser) {
+      const acts = el("div", "asUserActs");
+      if (!u.banned && !u.fake) {
+        const dmBtn = el("button", "asBtn asBtnSoft asBtnXs", "DM");
+        dmBtn.type = "button";
+        dmBtn.addEventListener("click", () => {
+          adminSide.classList.add("hide");
+          openDm(u.name);
+        });
+        acts.appendChild(dmBtn);
+      }
+      if (!u.banned) {
+        const verBtn = el("button", "asBtn " + (u.verified ? "asBtnSoft" : "asBtnPrimary") + " asBtnXs", u.verified ? "Unverify" : "Verify");
+        verBtn.type = "button";
+        verBtn.addEventListener("click", async () => {
+          if (!socket || socket.readyState !== 1) return;
+          verBtn.disabled = true;
+          try {
+            const r = await (u.verified ? socket.rpc.unverifyUser : socket.rpc.verifyUser)(JSON.stringify({ name: u.name }));
+            if (r === "ok" || r === "already") {
+              if (u.verified) verifiedSet.delete(u.name);
+              else verifiedSet.add(u.name);
+              refreshVerifiedUI();
+              toast(u.verified ? "Removed verification from " + u.name : "Verified " + u.name);
+              await loadAdminUsers();
+            } else {
+              toast("Action failed: " + r);
+            }
+          } catch (e) {}
+          verBtn.disabled = false;
+        });
+        acts.appendChild(verBtn);
+      }
+      const banBtn = el("button", "asBtn " + (u.banned ? "asBtnSuccess" : "asBtnDanger") + " asBtnXs", u.banned ? "Unban" : "Ban");
+      banBtn.type = "button";
+      banBtn.addEventListener("click", async () => {
+        if (!socket || socket.readyState !== 1) return;
+        banBtn.disabled = true;
+        try {
+          const r = await (u.banned ? socket.rpc.unbanUser : socket.rpc.banUser)(JSON.stringify({ name: u.name }));
+          if (r === "ok" || r === "already banned") {
+            if (u.banned) bannedNames.delete(u.name);
+            else bannedNames.add(u.name);
+            toast(u.banned ? "Unbanned " + u.name : "Banned " + u.name);
+            await loadAdminUsers();
+          } else {
+            toast("Action failed: " + r);
+          }
+        } catch (e) {}
+        banBtn.disabled = false;
+      });
+      acts.appendChild(banBtn);
+      row.appendChild(acts);
+    }
+    asUserList.appendChild(row);
+  }
+}
+
+async function refreshAdminPanelAll() {
+  if (!isAdmin()) return;
+  if (asRefreshAllBtn) asRefreshAllBtn.classList.add("spinning");
+  try {
+    await Promise.all([
+      loadAdminUsers(),
+      loadFakeUsers(),
+      loadDeletedMessages(),
+      loadPinned()
+    ]);
+    syncAdminOverview();
+  } finally {
+    if (asRefreshAllBtn) asRefreshAllBtn.classList.remove("spinning");
+  }
+}
+
+function openAdminPanel() {
+  if (!isAdmin()) return;
+  adminSide.classList.remove("hide");
+  if (asName && !asName.value.trim()) asName.value = myName;
+  syncAdminOverview();
+  refreshAdminPanelAll();
+}
+
 adminItem.addEventListener("click", () => {
   menuPop.classList.add("hide");
   openAdminPanel();
 });
 asCloseBtn.addEventListener("click", () => adminSide.classList.add("hide"));
-
 adminSide.addEventListener("click", (e) => { if (e.target === adminSide) adminSide.classList.add("hide"); });
+if (asRefreshAllBtn) asRefreshAllBtn.addEventListener("click", () => refreshAdminPanelAll());
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && adminSide && !adminSide.classList.contains("hide")) {
+    adminSide.classList.add("hide");
+  }
+});
 
-/* ---------- admin: deleted-message archive ----------
-   The server keeps a copy of every deleted message (see the DEL region) and
-   hands the list to the admin alone. A user who unsends their own message
-   leaves no note in the room, so this panel is the only place its content can
-   still be read. */
-const asDelList = document.getElementById("asDelList");
-const asDelRefreshBtn = document.getElementById("asDelRefreshBtn");
-const asDelClearBtn = document.getElementById("asDelClearBtn");
-let asDelBackfilled = false;
-let asDelClearArmed = false;
-let asDelClearTimer = null;
+if (asTabs) {
+  asTabs.addEventListener("click", (e) => {
+    const tab = e.target && e.target.closest ? e.target.closest(".asTab") : null;
+    if (!tab || !tab.dataset.astab) return;
+    setAdminTab(tab.dataset.astab);
+  });
+}
+if (adminSide) {
+  adminSide.addEventListener("click", (e) => {
+    const stat = e.target && e.target.closest ? e.target.closest(".asStatCard") : null;
+    if (!stat || !stat.dataset.asjump) return;
+    const parts = stat.dataset.asjump.split(":");
+    setAdminTab(parts[0]);
+    if (parts[0] === "users" && parts[1]) setAdminUserFilter(parts[1]);
+  });
+}
 
+/* ---------- admin overview: announcements & room controls ---------- */
+if (asAnnounceBtn) {
+  asAnnounceBtn.addEventListener("click", () => {
+    if (!isAdmin() || !socket || socket.readyState !== 1) { toast("Not connected"); return; }
+    const txt = asAnnounceInput ? asAnnounceInput.value.trim().slice(0, 240) : "";
+    if (!txt) { toast("Write an announcement first"); return; }
+    socket.send(JSON.stringify({ t: "sysmsg", text: txt, ts: Date.now() }));
+    asAnnounceInput.value = "";
+    toast("Announcement sent to room");
+  });
+}
+if (asPinNoticeBtn) {
+  asPinNoticeBtn.addEventListener("click", async () => {
+    if (!isAdmin() || !socket || socket.readyState !== 1) { toast("Not connected"); return; }
+    const txt = asAnnounceInput ? asAnnounceInput.value.trim().slice(0, 240) : "";
+    if (!txt) { toast("Write an announcement to pin"); return; }
+    const payload = { id: "notice-" + Date.now(), from: "Announcement", ts: Date.now(), text: txt, url: "" };
+    try {
+      let r = "ok";
+      if (socket.rpc && socket.rpc.pinMessage) r = await socket.rpc.pinMessage(JSON.stringify(payload));
+      else socket.send(JSON.stringify({ t: "pin", id: payload.id, from: payload.from, mts: payload.ts, text: payload.text, url: "" }));
+      if (r === "ok") {
+        renderPinned(Object.assign({}, payload, { by: myName, at: Date.now() }));
+        asAnnounceInput.value = "";
+        syncAdminOverview();
+        toast("Announcement pinned to room");
+      } else {
+        toast("Couldn't pin: " + r);
+      }
+    } catch (e) {}
+  });
+}
+if (asAnnounceInput) {
+  asAnnounceInput.addEventListener("keydown", (e) => { if (e.key === "Enter" && asAnnounceBtn) asAnnounceBtn.click(); });
+}
+
+if (asRoomTitleSaveBtn) {
+  asRoomTitleSaveBtn.addEventListener("click", async () => {
+    if (!isAdmin() || !socket || socket.readyState !== 1) { toast("Not connected"); return; }
+    const v = asRoomTitleInput ? asRoomTitleInput.value.trim().slice(0, 60) : "";
+    if (!v) { toast("Enter a room title"); return; }
+    try {
+      const r = await socket.rpc.setTitle(v);
+      if (r === "ok") {
+        setRoomTitle(v);
+        toast("Room title updated");
+      } else {
+        toast("Couldn't change title: " + r);
+      }
+    } catch (e) {}
+  });
+}
+if (asRoomTitleInput) {
+  asRoomTitleInput.addEventListener("keydown", (e) => { if (e.key === "Enter" && asRoomTitleSaveBtn) asRoomTitleSaveBtn.click(); });
+}
+if (asRoomIconBtn) {
+  asRoomIconBtn.addEventListener("click", () => {
+    adminSide.classList.add("hide");
+    iconModal.classList.remove("hide");
+  });
+}
+if (asUnpinBtn) {
+  asUnpinBtn.addEventListener("click", async () => {
+    if (!isAdmin() || !socket || socket.readyState !== 1) return;
+    try {
+      if (socket.rpc && socket.rpc.unpinMessage) await socket.rpc.unpinMessage("");
+      else socket.send(JSON.stringify({ t: "unpin" }));
+      renderPinned(null);
+      syncAdminOverview();
+      toast("Pinned message removed");
+    } catch (e) {}
+  });
+}
+if (asClearRoomBtn) {
+  asClearRoomBtn.addEventListener("click", async () => {
+    if (!isAdmin() || !socket || socket.readyState !== 1) { toast("Not connected"); return; }
+    if (!asClearRoomArmed) {
+      asClearRoomArmed = true;
+      asClearRoomBtn.textContent = "Tap again to wipe";
+      clearTimeout(asClearRoomTimer);
+      asClearRoomTimer = setTimeout(() => {
+        asClearRoomArmed = false;
+        asClearRoomBtn.textContent = "Clear Chat";
+      }, 4000);
+      return;
+    }
+    asClearRoomArmed = false;
+    clearTimeout(asClearRoomTimer);
+    asClearRoomBtn.textContent = "Clear Chat";
+    try {
+      const r = await socket.rpc.clearAll("");
+      if (r === "ok") toast("Room chat history cleared for everyone");
+      else toast("Clear failed: " + r);
+    } catch (e) {}
+  });
+}
+
+/* ---------- admin users: quick moderation & search ---------- */
+async function runQuickMod(action) {
+  if (!isAdmin() || !socket || socket.readyState !== 1) { toast("Not connected"); return; }
+  const target = asModName ? asModName.value.trim().slice(0, 20) : "";
+  if (!target) { toast("Enter a username"); return; }
+  if (/^admin$/i.test(target)) { toast("Can't modify the admin account"); return; }
+  try {
+    let r = "";
+    if (action === "verify") {
+      r = await socket.rpc.verifyUser(JSON.stringify({ name: target }));
+      if (r === "ok" || r === "already") {
+        verifiedSet.add(target);
+        refreshVerifiedUI();
+        toast(r === "already" ? target + " is already verified" : "Verified " + target);
+        asModName.value = "";
+        await loadAdminUsers();
+      } else toast("Failed: " + r);
+    } else if (action === "ban") {
+      r = await socket.rpc.banUser(JSON.stringify({ name: target }));
+      if (r === "ok" || r === "already banned") {
+        bannedNames.add(target);
+        toast(r === "already banned" ? target + " is already banned" : "Banned " + target);
+        asModName.value = "";
+        await loadAdminUsers();
+      } else toast("Failed: " + r);
+    } else if (action === "unban") {
+      r = await socket.rpc.unbanUser(JSON.stringify({ name: target }));
+      if (r === "ok") {
+        bannedNames.delete(target);
+        toast("Unbanned " + target);
+        asModName.value = "";
+        await loadAdminUsers();
+      } else toast("Failed: " + r);
+    }
+  } catch (e) {}
+}
+if (asModVerifyBtn) asModVerifyBtn.addEventListener("click", () => runQuickMod("verify"));
+if (asModBanBtn) asModBanBtn.addEventListener("click", () => runQuickMod("ban"));
+if (asModUnbanBtn) asModUnbanBtn.addEventListener("click", () => runQuickMod("unban"));
+if (asUserSearch) asUserSearch.addEventListener("input", () => renderAdminUsers());
+if (asUserChips) {
+  asUserChips.addEventListener("click", (e) => {
+    const chip = e.target && e.target.closest ? e.target.closest(".asChip") : null;
+    if (!chip || !chip.dataset.asfilter) return;
+    setAdminUserFilter(chip.dataset.asfilter);
+  });
+}
+
+/* ---------- admin: deleted-message archive ---------- */
 function delRecKind(rec) {
-  return rec.t === "img" ? "photo" : rec.t === "voice" ? "voice message" : "message";
+  return rec.t === "img" ? "photo" : rec.t === "voice" ? "voice" : "text";
 }
 function buildDeletedRow(rec) {
   const row = el("div", "asDelItem");
   const head = el("div", "asDelHead");
-  head.appendChild(el("span", "asDelWho", rec.from || "unknown"));
-  head.appendChild(el("span", "asDelKind", delRecKind(rec)));
-  head.appendChild(el("span", "asDelWhen", fmtTimeShort(rec.ts || rec.at)));
-  row.appendChild(head);
+  const senderName = String(rec.from || "unknown");
+  const av = el("span", "asAvatar" + (senderName.toLowerCase() === "admin" ? " adminAvatar" : ""));
+  paintAvatar(av, senderName);
+  av.removeAttribute("title");
+  head.appendChild(av);
+
+  const info = el("div", "asDelHeadInfo");
+  const topRow = el("div", "asDelTopRow");
+  topRow.appendChild(el("span", "asDelWho", senderName));
+  topRow.appendChild(el("span", "asDelKind", delRecKind(rec)));
+  topRow.appendChild(el("span", "asDelWhen", fmtTimeShort(rec.ts || rec.at)));
+  info.appendChild(topRow);
   const by = el("div", "asDelBy");
   by.textContent = rec.self
-    ? (rec.from || "unknown") + " deleted their own " + delRecKind(rec)
+    ? senderName + " deleted their own " + delRecKind(rec)
     : (rec.by || "a moderator") + " deleted this " + delRecKind(rec);
-  row.appendChild(by);
+  info.appendChild(by);
+  head.appendChild(info);
+  row.appendChild(head);
+
   const body = el("div", "asDelBody");
-  if (rec.t === "img" && rec.url) {
+  const safeUrl = isSafeAdminMediaUrl(rec.url) ? rec.url : "";
+  if (rec.t === "img" && safeUrl) {
     const im = el("img", "asDelImg");
-    im.src = rec.url; im.loading = "lazy"; im.alt = "";
+    im.src = safeUrl;
+    im.loading = "lazy";
+    im.alt = "";
+    im.addEventListener("click", () => openLightbox(safeUrl));
     body.appendChild(im);
     if (rec.caption) body.appendChild(el("div", "asDelText", rec.caption));
-  } else if (rec.t === "voice" && rec.url) {
+  } else if (rec.t === "voice" && safeUrl) {
     const au = el("audio", "asDelAudio");
-    au.src = rec.url; au.controls = true; au.preload = "none";
+    au.src = safeUrl;
+    au.controls = true;
+    au.preload = "none";
     body.appendChild(au);
   } else if (rec.text) {
     body.appendChild(el("div", "asDelText", rec.text));
@@ -4070,11 +4547,78 @@ function buildDeletedRow(rec) {
     body.appendChild(el("div", "asDelText asDelMissing", "(content unavailable)"));
   }
   row.appendChild(body);
+
+  const foot = el("div", "asDelFoot");
+  const copyVal = String(rec.text || rec.caption || "");
+  if (copyVal) {
+    const copyB = el("button", "asBtn asBtnSoft asBtnXs", "Copy");
+    copyB.type = "button";
+    copyB.addEventListener("click", () => {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(copyVal).then(() => toast("Copied")).catch(() => copyFallback(copyVal));
+      } else {
+        copyFallback(copyVal);
+      }
+    });
+    foot.appendChild(copyB);
+  }
+  if (senderName && senderName !== "unknown" && senderName.toLowerCase() !== "admin" && !isDeletedName(senderName)) {
+    const isB = bannedNames.has(senderName);
+    const modB = el("button", "asBtn " + (isB ? "asBtnSuccess" : "asBtnDanger") + " asBtnXs", isB ? "Unban" : "Ban user");
+    modB.type = "button";
+    modB.addEventListener("click", async () => {
+      if (!socket || socket.readyState !== 1) return;
+      modB.disabled = true;
+      try {
+        const r = await (isB ? socket.rpc.unbanUser : socket.rpc.banUser)(JSON.stringify({ name: senderName }));
+        if (r === "ok" || r === "already banned") {
+          if (isB) bannedNames.delete(senderName);
+          else bannedNames.add(senderName);
+          toast(isB ? "Unbanned " + senderName : "Banned " + senderName);
+          renderDeletedArchive();
+          loadAdminUsers();
+        }
+      } catch (e) {}
+      modB.disabled = false;
+    });
+    foot.appendChild(modB);
+  }
+  if (foot.childNodes.length) row.appendChild(foot);
   return row;
 }
-// Deletions older than this feature are recoverable: the moderator path has
-// always left a `delnote` row in the history store carrying the original
-// message, so hand those to the server archive once per session.
+
+function renderDeletedArchive() {
+  if (!asDelList) return;
+  const q = asDelSearch ? asDelSearch.value.trim().toLowerCase() : "";
+  const flt = asDelFilter ? asDelFilter.value : "all";
+  let list = asDeletedCache;
+  if (flt === "chat") list = list.filter((r) => !r.t || r.t === "chat");
+  else if (flt === "img") list = list.filter((r) => r.t === "img");
+  else if (flt === "voice") list = list.filter((r) => r.t === "voice");
+  else if (flt === "self") list = list.filter((r) => !!r.self);
+  else if (flt === "mod") list = list.filter((r) => !r.self);
+  if (q) {
+    list = list.filter((r) => {
+      const who = String(r.from || "").toLowerCase();
+      const txt = String(r.text || r.caption || "").toLowerCase();
+      const by = String(r.by || "").toLowerCase();
+      return who.includes(q) || txt.includes(q) || by.includes(q);
+    });
+  }
+  if (asDelMeta) {
+    asDelMeta.textContent = list.length === asDeletedCache.length
+      ? asDeletedCache.length + (asDeletedCache.length === 1 ? " message" : " messages")
+      : list.length + " of " + asDeletedCache.length + " messages";
+  }
+  asDelList.textContent = "";
+  if (!list.length) {
+    asDelList.appendChild(el("div", "asEmpty", asDeletedCache.length ? "No matching deleted messages." : "No deleted messages recorded yet."));
+    return;
+  }
+  const shown = list.slice(0, 150);
+  for (const rec of shown) asDelList.appendChild(buildDeletedRow(rec));
+}
+
 async function importOldDeleted() {
   if (asDelBackfilled) return;
   asDelBackfilled = true;
@@ -4105,92 +4649,96 @@ async function importOldDeleted() {
   if (!out.length) return;
   try { await socket.rpc.importDeleted(JSON.stringify(out)); } catch (e) {}
 }
+
 async function loadDeletedMessages() {
-  if (!asDelList) return;
-  if (!isAdmin()) return;
+  if (!asDelList || !isAdmin()) return;
   if (!socket || socket.readyState !== 1) {
     asDelList.textContent = "";
-    asDelList.appendChild(el("div", "asHint", "Not connected."));
+    asDelList.appendChild(el("div", "asEmpty", "Not connected."));
     return;
   }
   await importOldDeleted();
   let arr = [];
   try { arr = JSON.parse(await socket.rpc.getDeleted("")); } catch (e) { arr = []; }
-  if (!Array.isArray(arr)) arr = [];
-  asDelList.textContent = "";
-  if (!arr.length) {
-    asDelList.appendChild(el("div", "asHint", "No deleted messages recorded yet."));
-    return;
-  }
-  const shown = arr.slice(0, 150);
-  asDelList.appendChild(el("div", "asHint", arr.length + (arr.length === 1 ? " deleted message" : " deleted messages") + " — newest first." + (shown.length < arr.length ? " Showing the newest " + shown.length + "." : "")));
-  for (const rec of shown) asDelList.appendChild(buildDeletedRow(rec));
+  asDeletedCache = Array.isArray(arr) ? arr : [];
+  syncAdminOverview();
+  renderDeletedArchive();
 }
-asDelRefreshBtn.addEventListener("click", () => loadDeletedMessages());
-// Two taps rather than a native confirm(), which would block the whole app on
-// some mobile browsers.
-asDelClearBtn.addEventListener("click", async () => {
-  if (!isAdmin() || !socket || socket.readyState !== 1) { toast("Not connected"); return; }
-  if (!asDelClearArmed) {
-    asDelClearArmed = true;
-    asDelClearBtn.textContent = "Tap again to erase";
-    clearTimeout(asDelClearTimer);
-    asDelClearTimer = setTimeout(() => { asDelClearArmed = false; asDelClearBtn.textContent = "Clear archive"; }, 4000);
-    return;
-  }
-  asDelClearArmed = false;
-  clearTimeout(asDelClearTimer);
-  asDelClearBtn.textContent = "Clear archive";
-  try { await socket.rpc.clearDeleted(""); toast("Deleted-message archive erased"); } catch (e) {}
-  loadDeletedMessages();
-});
 
-const asName = document.getElementById("asName");
+if (asDelSearch) asDelSearch.addEventListener("input", () => renderDeletedArchive());
+if (asDelFilter) asDelFilter.addEventListener("change", () => renderDeletedArchive());
+if (asDelRefreshBtn) asDelRefreshBtn.addEventListener("click", () => loadDeletedMessages());
+if (asDelExportBtn) {
+  asDelExportBtn.addEventListener("click", () => {
+    if (!asDeletedCache.length) { toast("Archive is empty"); return; }
+    try {
+      const blob = new Blob([JSON.stringify(asDeletedCache, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "deleted-messages-" + new Date().toISOString().slice(0, 10) + ".json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast("Archive exported");
+    } catch (e) {
+      toast("Couldn't export archive");
+    }
+  });
+}
+if (asDelClearBtn) {
+  asDelClearBtn.addEventListener("click", async () => {
+    if (!isAdmin() || !socket || socket.readyState !== 1) { toast("Not connected"); return; }
+    if (!asDelClearArmed) {
+      asDelClearArmed = true;
+      asDelClearBtn.textContent = "Tap again to erase";
+      clearTimeout(asDelClearTimer);
+      asDelClearTimer = setTimeout(() => { asDelClearArmed = false; asDelClearBtn.textContent = "Clear archive"; }, 4000);
+      return;
+    }
+    asDelClearArmed = false;
+    clearTimeout(asDelClearTimer);
+    asDelClearBtn.textContent = "Clear archive";
+    try { await socket.rpc.clearDeleted(""); toast("Deleted-message archive erased"); } catch (e) {}
+    loadDeletedMessages();
+  });
+}
+
+/* ---------- simulator: fake presence & fake users ---------- */
 function sendFakeSys(suffix) {
   if (!socket || socket.readyState !== 1) { toast("Not connected yet"); return; }
   const name = (asName.value || "").trim().slice(0, 20) || myName;
   socket.send(JSON.stringify({ t: "sysmsg", text: name + suffix, presence: suffix.trim() === "joined" ? "join" : "left", ts: Date.now() }));
+  toast("Sent \"" + name + suffix + "\"");
 }
 document.getElementById("asJoinBtn").addEventListener("click", () => sendFakeSys(" joined"));
 document.getElementById("asLeftBtn").addEventListener("click", () => sendFakeSys(" left"));
 
-/* ---------- fake user test ---------- */
-const asFakeName = document.getElementById("asFakeName");
-const asFakeCreateBtn = document.getElementById("asFakeCreateBtn");
-const asFakeList = document.getElementById("asFakeList");
-const asFakeSendRow = document.getElementById("asFakeSendRow");
-const asFakeMsg = document.getElementById("asFakeMsg");
-const asFakeSendBtn = document.getElementById("asFakeSendBtn");
-const fakeUsers = new Set();
-let selectedFake = null;
-
 function refreshFakeList() {
-  asFakeList.innerHTML = "";
+  asFakeList.textContent = "";
+  if (asFakeClearAllBtn) asFakeClearAllBtn.classList.toggle("hide", fakeUsers.size === 0);
   if (!fakeUsers.size) {
-    const e = document.createElement("div");
-    e.className = "asEmpty";
-    e.textContent = "No fake users yet";
-    asFakeList.appendChild(e);
+    asFakeList.appendChild(el("div", "asEmpty", "No fake users yet. Create one above to test messaging."));
     asFakeSendRow.classList.add("hide");
     return;
   }
   for (const n of [...fakeUsers].sort()) {
-    const row = document.createElement("div");
-    row.className = "asFakeItem" + (n === selectedFake ? " active" : "");
-    const lbl = document.createElement("span");
-    lbl.textContent = n;
-    row.appendChild(lbl);
-    const btns = document.createElement("span");
-    btns.className = "asFakeItemBtns";
-    const sendB = document.createElement("button");
-    sendB.className = "asFakeSendMini";
-    sendB.textContent = "Send as";
-    sendB.title = "Send a message as " + n;
+    const row = el("div", "asFakeItem" + (n === selectedFake ? " active" : ""));
+    const left = el("div", "asFakeLeft");
+    const av = el("span", "asAvatar");
+    paintAvatar(av, n);
+    av.removeAttribute("title");
+    left.appendChild(av);
+    left.appendChild(el("span", "asFakeNameTxt", n));
+    row.appendChild(left);
+
+    const btns = el("div", "asFakeItemBtns");
+    const sendB = el("button", "asBtn asBtnPrimary asBtnXs", "Send as");
+    sendB.type = "button";
     sendB.addEventListener("click", (e) => { e.stopPropagation(); selectFake(n); asFakeMsg.focus(); });
-    const delB = document.createElement("button");
-    delB.className = "asFakeDelMini";
-    delB.textContent = "Remove";
-    delB.title = "Remove " + n;
+    const delB = el("button", "asBtn asBtnDanger asBtnXs", "Remove");
+    delB.type = "button";
     delB.addEventListener("click", (e) => {
       e.stopPropagation();
       if (!socket || socket.readyState !== 1) return;
@@ -4198,6 +4746,7 @@ function refreshFakeList() {
       fakeUsers.delete(n);
       if (selectedFake === n) { selectedFake = null; asFakeSendRow.classList.add("hide"); }
       refreshFakeList();
+      renderAdminUsers();
     });
     btns.appendChild(sendB);
     btns.appendChild(delB);
@@ -4209,6 +4758,7 @@ function refreshFakeList() {
 
 function selectFake(n) {
   selectedFake = n;
+  if (asFakeActiveLabel) asFakeActiveLabel.textContent = "Posting as " + n;
   asFakeMsg.placeholder = "Message as " + n + "…";
   asFakeSendRow.classList.remove("hide");
   refreshFakeList();
@@ -4227,7 +4777,25 @@ asFakeCreateBtn.addEventListener("click", () => {
   fakeUsers.add(name);
   asFakeName.value = "";
   selectFake(name);
+  renderAdminUsers();
 });
+
+if (asFakeClearAllBtn) {
+  asFakeClearAllBtn.addEventListener("click", async () => {
+    if (!isAdmin() || !socket || socket.readyState !== 1) return;
+    try {
+      const r = await socket.rpc.clearFakeUsers("");
+      if (r === "ok") {
+        fakeUsers.clear();
+        selectedFake = null;
+        asFakeSendRow.classList.add("hide");
+        refreshFakeList();
+        await loadAdminUsers();
+        toast("All fake users removed");
+      }
+    } catch (e) {}
+  });
+}
 
 asFakeSendBtn.addEventListener("click", async () => {
   if (!selectedFake) { toast("Select a fake user first"); return; }
@@ -4248,7 +4816,7 @@ async function loadFakeUsers() {
   try {
     const arr = JSON.parse(await socket.rpc.getFakeUsers(""));
     fakeUsers.clear();
-    for (const n of arr) fakeUsers.add(n);
+    if (Array.isArray(arr)) for (const n of arr) fakeUsers.add(n);
     if (selectedFake && !fakeUsers.has(selectedFake)) { selectedFake = null; asFakeSendRow.classList.add("hide"); }
     refreshFakeList();
   } catch (e) {}
