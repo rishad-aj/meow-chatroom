@@ -542,7 +542,9 @@ let scrollCtnEl = roomScrollCtn;
 const scrollDownBtn = document.getElementById("scrollDownBtn");
 let _scrollBtnHidden = null;
 function updateScrollBtn() {
-  const hide = scrollCtnEl.scrollHeight - scrollCtnEl.scrollTop - scrollCtnEl.clientHeight < 60;
+  const windowed = (convo.mode === "room" && roomWindowedJump) ||
+    (convo.mode === "dm" && typeof dmIsWindowed === "function" && dmIsWindowed(convo.peer));
+  const hide = !windowed && (scrollCtnEl.scrollHeight - scrollCtnEl.scrollTop - scrollCtnEl.clientHeight < 60);
   if (_scrollBtnHidden !== hide) {
     _scrollBtnHidden = hide;
     scrollDownBtn.classList.toggle("hide", hide);
@@ -557,7 +559,8 @@ roomScrollCtn.addEventListener("scroll", () => {
     if (convo.mode !== "room") return;
     updateScrollBtn();
     const nb = isNearBottom();
-    if (!nb) {
+    stickToBottom = !roomWindowedJump && nb;
+    if (!nb || roomWindowedJump) {
       userScrolledUp = true;
       syncUnreadChipArrow();
     } else if (document.visibilityState !== "hidden" && Date.now() >= bannerJumpUntil) {
@@ -567,6 +570,7 @@ roomScrollCtn.addEventListener("scroll", () => {
       }
     }
     maybeLoadOlder();
+    if (roomWindowedJump) maybeLoadNewerRoom();
   });
   if (translateOn) {
     clearTimeout(transDebounce);
@@ -590,6 +594,14 @@ function animateScrollTo(targetTop) {
   step();
 }
 scrollDownBtn.addEventListener("click", () => {
+  if (convo.mode === "room" && roomWindowedJump) {
+    returnRoomToLatest();
+    return;
+  }
+  if (convo.mode === "dm" && dmIsWindowed(convo.peer)) {
+    returnDmToLatest(convo.peer);
+    return;
+  }
   animateScrollTo(scrollCtnEl.scrollHeight);
 });
 
@@ -693,15 +705,20 @@ function stickyActive() {
 function stickyHideNow() {
   clearTimeout(stickyHideT);
   stickyLastTop = -1;
+  _stickyGeoKey = "";
+  _stickyVisibleTop = null;
   if (stickyWrap) stickyWrap.classList.remove("show");
 }
-function stickyPlace() {
+let _stickyGeoKey = "";
+let _stickyVisibleTop = null;
+function stickyPlace(force) {
   if (!stickyWrap || !appHost) return null;
   if (stickyWrap.parentElement !== appHost) appHost.appendChild(stickyWrap);
   const { sc } = stickyActive();
-  if (!sc || sc.classList.contains("hide")) { stickyHideNow(); return null; }
+  if (!sc || sc.classList.contains("hide")) { stickyHideNow(); _stickyGeoKey = ""; _stickyVisibleTop = null; return null; }
+  if (!force && _stickyGeoKey && _stickyVisibleTop != null) return _stickyVisibleTop;
   const scRect = sc.getBoundingClientRect();
-  if (scRect.width <= 0 || scRect.height <= 0) { stickyHideNow(); return null; }
+  if (scRect.width <= 0 || scRect.height <= 0) { stickyHideNow(); _stickyGeoKey = ""; _stickyVisibleTop = null; return null; }
   const appRect = appHost.getBoundingClientRect();
   let topEdge = scRect.top - appRect.top;
   if (stickyTopbarEl && !stickyTopbarEl.classList.contains("hide")) {
@@ -712,37 +729,75 @@ function stickyPlace() {
     const pr = stickyPinnedEl.getBoundingClientRect();
     if (pr.height > 0) topEdge = Math.max(topEdge, pr.bottom - appRect.top);
   }
-  stickyWrap.style.top = Math.round(topEdge + 8) + "px";
-  stickyWrap.style.left = Math.round(scRect.left - appRect.left) + "px";
-  stickyWrap.style.width = Math.round(sc.clientWidth || scRect.width) + "px";
-  stickyWrap.style.right = "auto";
-  return appRect.top + topEdge;
+  const topPx = Math.round(topEdge + 8);
+  const leftPx = Math.round(scRect.left - appRect.left);
+  const widthPx = Math.round(sc.clientWidth || scRect.width);
+  const key = topPx + "|" + leftPx + "|" + widthPx;
+  if (key !== _stickyGeoKey) {
+    _stickyGeoKey = key;
+    stickyWrap.style.top = topPx + "px";
+    stickyWrap.style.left = leftPx + "px";
+    stickyWrap.style.width = widthPx + "px";
+    stickyWrap.style.right = "auto";
+  }
+  _stickyVisibleTop = appRect.top + topEdge;
+  return _stickyVisibleTop;
 }
 function stickyShow() {
-  const visibleTop = stickyPlace();
+  const visibleTop = stickyPlace(false);
   if (visibleTop == null) return;
   const { list } = stickyActive();
-  let label = "";
   const kids = list.children;
-  for (let i = 0; i < kids.length; i++) {
+  const len = kids.length;
+  if (!len) return;
+  // O(log N) binary search for the first child whose bottom extends below visibleTop + 28
+  let lo = 0;
+  let hi = len - 1;
+  let hit = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const r = kids[mid].getBoundingClientRect();
+    if (r.bottom > visibleTop + 28) {
+      hit = mid;
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  if (hit === -1) hit = len - 1;
+  // Check only the immediate neighborhood around `hit` for an in-flow daySep at the top edge
+  const checkStart = Math.max(0, hit - 2);
+  const checkEnd = Math.min(len - 1, hit + 2);
+  for (let i = checkStart; i <= checkEnd; i++) {
     const n = kids[i];
-    if (!n.classList) continue;
-    // If an in-flow date capsule is already visible right at the top of the viewport,
-    // avoid doubling it up with the floating sticky pill.
-    if (n.classList.contains("daySep")) {
+    if (n.classList && n.classList.contains("daySep")) {
       const sr = n.getBoundingClientRect();
       if (sr.bottom > visibleTop && sr.top < visibleTop + 48) {
         stickyHideNow();
         return;
       }
-      continue;
     }
-    if (!n.classList.contains("msg")) continue;
-    const ts = Number(n.dataset && n.dataset.ts) || 0;
-    if (!ts) continue;
-    label = fmtDatePill(new Date(ts));
-    if (n.getBoundingClientRect().bottom > visibleTop + 28) break;
   }
+  // Resolve timestamp from `hit` (or nearest .msg neighbor)
+  let ts = 0;
+  for (let i = hit; i < len && i <= hit + 4; i++) {
+    const n = kids[i];
+    if (n.classList && n.classList.contains("msg")) {
+      ts = Number(n.dataset && n.dataset.ts) || 0;
+      if (ts) break;
+    }
+  }
+  if (!ts) {
+    for (let i = hit - 1; i >= 0 && i >= hit - 4; i--) {
+      const n = kids[i];
+      if (n.classList && n.classList.contains("msg")) {
+        ts = Number(n.dataset && n.dataset.ts) || 0;
+        if (ts) break;
+      }
+    }
+  }
+  if (!ts) return;
+  const label = fmtDatePill(new Date(ts));
   if (label && stickyPill.textContent !== label) stickyPill.textContent = label;
   if (!label) return;
   stickyPill.classList.remove("hide");
@@ -761,7 +816,9 @@ for (const scroller of [roomScrollCtn, dmScrollEl]) {
   scroller.addEventListener("scroll", stickyOnScroll, { passive: true });
 }
 window.addEventListener("resize", () => {
-  if (stickyWrap && stickyWrap.classList.contains("show")) stickyPlace();
+  _stickyGeoKey = "";
+  _stickyVisibleTop = null;
+  if (stickyWrap && stickyWrap.classList.contains("show")) stickyPlace(true);
 });
 const peopleScreen = document.getElementById("peopleScreen");
 const peopleHead = document.getElementById("peopleHead");
@@ -1062,12 +1119,6 @@ function retargetTailObserver() {
    view back down when that was the case. Somebody who scrolled up is never
    touched, so this cannot fight anyone reading back through history. */
 let stickToBottom = true;
-function noteViewPos(e) {
-  if (e.currentTarget !== scrollCtnEl) return;   // the hidden container is not the one on screen
-  stickToBottom = isNearBottom();
-}
-roomScrollCtn.addEventListener("scroll", noteViewPos, { passive: true });
-dmScrollEl.addEventListener("scroll", noteViewPos, { passive: true });
 let selSuppressResyncUntil = 0;
 function resyncBottom() {
   if (!stickToBottom) return;
@@ -1466,6 +1517,7 @@ async function refreshPeople() {
 
 function openPeople() {
   stickyHideNow();
+  if (typeof closeMsgSearch === "function") closeMsgSearch();
   if (selectionMode) endSelection();
   leaveDm();
   convo = { mode: "people", peer: "" };
@@ -1489,6 +1541,7 @@ function openPeople() {
 
 async function showRoom() {
   stickyHideNow();
+  if (typeof closeMsgSearch === "function") closeMsgSearch();
   if (selectionMode) endSelection();
   leaveDm();
   peopleOpen = false;
@@ -1541,28 +1594,217 @@ function leaveDm() {
   delete dmMessagesEl.dataset.peer;
 }
 
-function renderDmThread(msgs) {
+const DM_INITIAL_PAGE = 150;
+const DM_OLDER_PAGE = 50;
+const dmFullMsgsByPeer = new Map();
+const dmRenderedStartByPeer = new Map();
+const dmRenderedEndByPeer = new Map();
+
+function dmIsWindowed(peer) {
+  if (!peer) return false;
+  const full = dmFullMsgsByPeer.get(peer);
+  const end = dmRenderedEndByPeer.get(peer);
+  return !!(full && typeof end === "number" && end < full.length);
+}
+
+function firstRealDmNode() {
+  for (const n of dmMessagesEl.children) {
+    if (n.id === "stickyDateWrap") continue;
+    if (n.classList.contains("sep") || n.classList.contains("unreadBanner") || n.classList.contains("pEmpty")) continue;
+    return n;
+  }
+  return null;
+}
+
+function renderDmWindow(peer, startIdx, endIdx, snapBottom) {
+  const full = dmFullMsgsByPeer.get(peer) || [];
+  const sIdx = Math.max(0, Math.min(full.length, startIdx));
+  const eIdx = Math.max(sIdx, Math.min(full.length, endIdx));
   msgByWrapCleanup(dmMessagesEl);
+  if (peer) {
+    dmRenderedStartByPeer.set(peer, sIdx);
+    dmRenderedEndByPeer.set(peer, eIdx);
+  }
   const frag = document.createDocumentFragment();
+  const newBubbles = [];
   let prevFrom = null;
-  for (const raw of msgs) {
-    if (!raw || !raw.t) continue;
-    const m = enrichReply(raw);
+  for (let i = sIdx; i < eIdx; i++) {
+    const m = enrichReply(full[i]);
+    if (!m || !m.t) continue;
     if (m.t === "system") {
-      frag.appendChild(sysDom(m));
+      const s = sysDom(m);
+      s.classList.add("noAnim");
+      frag.appendChild(s);
       prevFrom = null;
     } else {
       const grouped = !!(prevFrom && m.from && prevFrom === m.from);
-      frag.appendChild(buildMessageDom(m, grouped));
+      const wrap = buildMessageDom(m, grouped);
+      wrap.classList.add("noAnim");
+      frag.appendChild(wrap);
+      const b = wrap && wrap.querySelector ? wrap.querySelector(".bubble") : null;
+      if (b) newBubbles.push(b);
       prevFrom = m.from || null;
     }
   }
   if (!frag.childNodes.length) frag.appendChild(el("div", "pEmpty", "No messages yet \u2014 say hi."));
   dmMessagesEl.replaceChildren(frag);
   updateBubbleTails();
-  scheduleDaySeps();
-  scheduleLongSync();
-  scrollBottom(true);
+  refreshDaySeps();
+  scheduleReplyCounts();
+  scheduleLongSyncBatch(newBubbles);
+  applyDmSeen();
+  if (translateOn) translateViewport();
+  if (snapBottom) scrollBottom(true);
+  updateScrollBtn();
+}
+
+function renderDmThread(msgs, peer) {
+  const targetPeer = peer || (convo.mode === "dm" ? convo.peer : "") || "";
+  const full = Array.isArray(msgs) ? msgs.filter((raw) => raw && raw.t) : [];
+  if (targetPeer) dmFullMsgsByPeer.set(targetPeer, full.slice());
+  const startIdx = Math.max(0, full.length - DM_INITIAL_PAGE);
+  renderDmWindow(targetPeer, startIdx, full.length, true);
+}
+
+function returnDmToLatest(peer) {
+  const targetPeer = peer || (convo.mode === "dm" ? convo.peer : "") || "";
+  const full = dmFullMsgsByPeer.get(targetPeer);
+  if (!full) return;
+  const startIdx = Math.max(0, full.length - DM_INITIAL_PAGE);
+  renderDmWindow(targetPeer, startIdx, full.length, true);
+}
+
+let dmPrepending = false;
+function prependOlderDmMessages(peer, targetStartIdx) {
+  if (dmPrepending || !peer || convo.mode !== "dm" || convo.peer !== peer) return 0;
+  const full = dmFullMsgsByPeer.get(peer);
+  const curStart = dmRenderedStartByPeer.get(peer);
+  if (!full || typeof curStart !== "number" || curStart <= 0) return 0;
+  const nextStart = typeof targetStartIdx === "number"
+    ? Math.max(0, Math.min(curStart, targetStartIdx))
+    : Math.max(0, curStart - DM_OLDER_PAGE);
+  if (nextStart >= curStart) return 0;
+  dmPrepending = true;
+  try {
+    const anchor = firstRealDmNode();
+    const prevScrollHeight = dmScrollEl ? dmScrollEl.scrollHeight : 0;
+    const prevScrollTop = dmScrollEl ? dmScrollEl.scrollTop : 0;
+    const refMsg = (anchor && anchor.classList.contains("msg")) ? (msgByWrap.get(anchor) || null) : null;
+    const frag = document.createDocumentFragment();
+    const newBubbles = [];
+    let prevFrom = null;
+    let added = 0;
+    for (let i = nextStart; i < curStart; i++) {
+      const m = enrichReply(full[i]);
+      if (!m || !m.t) continue;
+      if (m.t === "system") {
+        const s = sysDom(m);
+        s.classList.add("noAnim");
+        frag.appendChild(s);
+        prevFrom = null;
+      } else {
+        const grouped = !!(prevFrom && m.from && prevFrom === m.from);
+        const wrap = buildMessageDom(m, grouped);
+        wrap.classList.add("noAnim");
+        frag.appendChild(wrap);
+        const b = wrap && wrap.querySelector ? wrap.querySelector(".bubble") : null;
+        if (b) newBubbles.push(b);
+        prevFrom = m.from || null;
+        added++;
+      }
+    }
+    dmRenderedStartByPeer.set(peer, nextStart);
+    if (added > 0) {
+      if (anchor) {
+        dmMessagesEl.insertBefore(frag, anchor);
+        if (prevFrom && refMsg && prevFrom === refMsg.from) {
+          anchor.classList.add("grouped");
+          const refSn = anchor.querySelector(".bubble > .senderName");
+          if (refSn) refSn.remove();
+        }
+      } else {
+        dmMessagesEl.appendChild(frag);
+      }
+      syncPrependedNodes(dmMessagesEl, added + 2);
+      if (dmScrollEl) {
+        const delta = dmScrollEl.scrollHeight - prevScrollHeight;
+        dmScrollEl.scrollTop = Math.max(16, prevScrollTop + delta);
+      }
+      applyDmSeen();
+      scheduleDaySeps();
+      scheduleReplyCounts();
+      scheduleLongSyncBatch(newBubbles);
+      if (translateOn) translateViewport();
+    }
+    return added;
+  } finally {
+    dmPrepending = false;
+  }
+}
+
+let dmAppending = false;
+function appendNewerDmMessages(peer) {
+  if (dmAppending || !peer || convo.mode !== "dm" || convo.peer !== peer) return 0;
+  const full = dmFullMsgsByPeer.get(peer);
+  const curEnd = dmRenderedEndByPeer.get(peer);
+  if (!full || typeof curEnd !== "number" || curEnd >= full.length) return 0;
+  const nextEnd = Math.min(full.length, curEnd + DM_OLDER_PAGE);
+  dmAppending = true;
+  try {
+    const frag = document.createDocumentFragment();
+    const newBubbles = [];
+    let prevFrom = withMsgHost(dmMessagesEl, () => lastMessageFrom());
+    let added = 0;
+    for (let i = curEnd; i < nextEnd; i++) {
+      const m = enrichReply(full[i]);
+      if (!m || !m.t) continue;
+      if (m.t === "system") {
+        const s = sysDom(m);
+        s.classList.add("noAnim");
+        frag.appendChild(s);
+        prevFrom = null;
+      } else {
+        const grouped = !!(prevFrom && m.from && prevFrom === m.from);
+        const wrap = buildMessageDom(m, grouped);
+        wrap.classList.add("noAnim");
+        frag.appendChild(wrap);
+        const b = wrap && wrap.querySelector ? wrap.querySelector(".bubble") : null;
+        if (b) newBubbles.push(b);
+        prevFrom = m.from || null;
+        added++;
+      }
+    }
+    dmRenderedEndByPeer.set(peer, nextEnd);
+    if (added > 0) {
+      dmMessagesEl.appendChild(frag);
+      updateBubbleTails();
+      applyDmSeen();
+      scheduleDaySeps();
+      scheduleReplyCounts();
+      scheduleLongSyncBatch(newBubbles);
+      if (translateOn) translateViewport();
+      updateScrollBtn();
+    }
+    return added;
+  } finally {
+    dmAppending = false;
+  }
+}
+
+function maybeLoadOlderDm() {
+  if (convo.mode !== "dm" || dmPrepending) return;
+  const curStart = dmRenderedStartByPeer.get(convo.peer);
+  if (typeof curStart !== "number" || curStart <= 0) return;
+  if (dmScrollEl.scrollTop < OLDER_TRIGGER_PX) {
+    prependOlderDmMessages(convo.peer);
+  }
+}
+
+function maybeLoadNewerDm() {
+  if (convo.mode !== "dm" || dmAppending || !dmIsWindowed(convo.peer)) return;
+  if (dmScrollEl.scrollHeight - dmScrollEl.scrollTop - dmScrollEl.clientHeight < OLDER_TRIGGER_PX) {
+    appendNewerDmMessages(convo.peer);
+  }
 }
 
 async function openDm(name) {
@@ -1571,6 +1813,7 @@ async function openDm(name) {
   if (!canDm(peer)) return;
   if (convo.mode === "dm" && convo.peer === peer) return;
   stickyHideNow();
+  if (typeof closeMsgSearch === "function") closeMsgSearch();
   if (selectionMode) endSelection();
   leaveDm();
   peopleOpen = false;
@@ -1614,29 +1857,44 @@ async function openDm(name) {
   // badge-free in the same pass.
   refreshListView();
   markDmRead(true);
-  let r = null;
-  try { r = JSON.parse(await socket.rpc.getDm(JSON.stringify({ peer }))); } catch (e) {}
-  if (convo.mode !== "dm" || convo.peer !== peer) return;
-  const msgs = (r && Array.isArray(r.msgs)) ? r.msgs : [];
-  dmPeerRead = Math.max(dmPeerRead, Number((r && r.read) || 0));
-  // The server only hands back the newest DM_MSGS_MAX messages; the Supabase
-  // mirror holds everything, so merge the older half back in front of them.
-  const full = await dmHistoryWithSupabase(peer, msgs);
-  if (convo.mode !== "dm" || convo.peer !== peer) return;
-  for (const mm of full) {
-    if (mm && mm.from === peer) dmPeerRead = Math.max(dmPeerRead, Number(mm.ts) || 0);
+  dmLoadingPeer = peer;
+  if (msgSearchOpen) updateMsgSearchUi();
+  try {
+    let r = null;
+    try { r = JSON.parse(await socket.rpc.getDm(JSON.stringify({ peer }))); } catch (e) {}
+    if (convo.mode !== "dm" || convo.peer !== peer) return;
+    const msgs = (r && Array.isArray(r.msgs)) ? r.msgs : [];
+    dmPeerRead = Math.max(dmPeerRead, Number((r && r.read) || 0));
+    // The server only hands back the newest DM_MSGS_MAX messages; the Supabase
+    // mirror holds everything, so merge the older half back in front of them.
+    const full = await dmHistoryWithSupabase(peer, msgs);
+    if (convo.mode !== "dm" || convo.peer !== peer) return;
+    for (const mm of full) {
+      if (mm && mm.from === peer) dmPeerRead = Math.max(dmPeerRead, Number(mm.ts) || 0);
+    }
+    if (knownThread) knownThread.read = Math.max(Number(knownThread.read) || 0, dmPeerRead);
+    sbDmBackfill(peer, msgs);
+    const prevFull = dmFullMsgsByPeer.get(peer);
+    const lastPrev = prevFull && prevFull.length ? prevFull[prevFull.length - 1] : null;
+    const lastNew = full.length ? full[full.length - 1] : null;
+    const sameFull = !!(cached && prevFull && prevFull.length === full.length &&
+      ((!lastPrev && !lastNew) || (lastPrev && lastNew && lastPrev.ts === lastNew.ts && lastPrev.id === lastNew.id)));
+    if (!sameFull) renderDmThread(full, peer);
+    else { dmMessagesEl.querySelectorAll(".pEmpty").forEach((n) => n.remove()); scrollBottom(true); }
+    applyDmSeen();
+    markDmRead(true);
+    // Translate the just-opened thread (with translation on, the loaded history
+    // would otherwise stay untranslated until the next scroll).
+    if (translateOn) translateViewport();
+    if (interactionReady() && isDesktopPointer() && !msgSearchOpen) msgInput.focus();
+  } finally {
+    if (dmLoadingPeer === peer) dmLoadingPeer = null;
+    if (msgSearchOpen && convo.mode === "dm" && convo.peer === peer) {
+      const q = msgSearchInput ? msgSearchInput.value.trim() : "";
+      if (q) runMsgSearch({ smooth: true });
+      else updateMsgSearchUi();
+    }
   }
-  if (knownThread) knownThread.read = Math.max(Number(knownThread.read) || 0, dmPeerRead);
-  sbDmBackfill(peer, msgs);
-  const painted = dmMessagesEl.querySelectorAll(".msg").length;
-  if (!cached || painted !== full.length) renderDmThread(full);
-  else { dmMessagesEl.querySelectorAll(".pEmpty").forEach((n) => n.remove()); scrollBottom(true); }
-  applyDmSeen();
-  markDmRead(true);
-  // Translate the just-opened thread (with translation on, the loaded history
-  // would otherwise stay untranslated until the next scroll).
-  if (translateOn) translateViewport();
-  if (interactionReady() && isDesktopPointer()) msgInput.focus();
 }
 
 // "Seen" is derived, never stored on the bubble: the other side's read mark is
@@ -1767,21 +2025,39 @@ function handleDm(m) {
   // travels in `sub`. Restore it before the renderers see the message.
   if (!m.ev) m.t = m.sub === "img" ? "img" : m.sub === "voice" ? "voice" : "chat";
   if (alreadyRendered(host, m)) return;
+  const cachedArr = dmFullMsgsByPeer.get(peer);
+  const wasWindowed = dmIsWindowed(peer);
+  if (cachedArr) {
+    cachedArr.push(m);
+    if (!wasWindowed) dmRenderedEndByPeer.set(peer, cachedArr.length);
+  }
   const mine = isMine(m);
-  const wasNearBottom = active && isNearBottom();
+  const wasNearBottom = active && !wasWindowed && isNearBottom();
   const tabVisible = document.visibilityState !== "hidden";
   if (m.replyTo && m.replyTo.from) replyKvNote(m.replyTo);
   if (active) {
-    if (mine) removeUploadPlaceholderForHost(dmMessagesEl);
-    const wrap = addMessageDom(m);
-    translateRealtimeMessage(m, wrap);
-    if (!mine) stopTyping(peer);
-    if (!mine && tabVisible) playNotify();
-    showMessageNotification(m);
-    if (mine) { scrollBottom(true); applyDmSeen(); }
-    else if (wasNearBottom && tabVisible) { scrollBottom(true); markDmRead(true); }
-    else updateScrollBtn();
-  } else if (host) {
+    if (wasWindowed) {
+      if (mine) {
+        removeUploadPlaceholderForHost(dmMessagesEl);
+        returnDmToLatest(peer);
+      } else {
+        stopTyping(peer);
+        if (tabVisible) playNotify();
+        showMessageNotification(m);
+        updateScrollBtn();
+      }
+    } else {
+      if (mine) removeUploadPlaceholderForHost(dmMessagesEl);
+      const wrap = addMessageDom(m);
+      translateRealtimeMessage(m, wrap);
+      if (!mine) stopTyping(peer);
+      if (!mine && tabVisible) playNotify();
+      showMessageNotification(m);
+      if (mine) { scrollBottom(true); applyDmSeen(); }
+      else if (wasNearBottom && tabVisible) { scrollBottom(true); markDmRead(true); }
+      else updateScrollBtn();
+    }
+  } else if (host && !wasWindowed) {
     withMsgHost(host, () => {
       stripEmptyHint(host);
       if (mine) removeUploadPlaceholderForHost(host);
@@ -1819,6 +2095,9 @@ function dropDmLocal(peer) {
   if (hold) { msgByWrapCleanup(hold); hold.textContent = ""; }
   dmDom.delete(peer);
   dmScrollTops.delete(peer);
+  dmFullMsgsByPeer.delete(peer);
+  dmRenderedStartByPeer.delete(peer);
+  dmRenderedEndByPeer.delete(peer);
   delete dmUnreadMap[peer];
   delete dmUnreadBumpAt[peer];
   saveDmUnread();
@@ -1917,7 +2196,13 @@ dmScrollEl.addEventListener("scroll", () => {
     _dmScrollRaf = requestAnimationFrame(() => {
       _dmScrollRaf = 0;
       updateScrollBtn();
-      if (convo.mode === "dm" && isNearBottom()) markDmRead();
+      if (convo.mode === "dm") {
+        const nb = isNearBottom();
+        stickToBottom = !dmIsWindowed(convo.peer) && nb;
+        if (nb && !dmIsWindowed(convo.peer)) markDmRead();
+        maybeLoadOlderDm();
+        maybeLoadNewerDm();
+      }
     });
   }
   if (translateOn) {
@@ -4869,13 +5154,62 @@ function syncBubblesLongBatch(bubbles) {
     if (results[i] !== null) items[i].bubble.classList.toggle("is-long", results[i]);
   }
 }
+let longSyncChunkRaf = 0;
+let longSyncChunkQueue = [];
+function flushLongSyncChunk() {
+  longSyncChunkRaf = 0;
+  if (!longSyncChunkQueue.length) return;
+  const slice = longSyncChunkQueue.splice(0, 100);
+  syncBubblesLongBatch(slice);
+  if (longSyncChunkQueue.length) {
+    longSyncChunkRaf = requestAnimationFrame(flushLongSyncChunk);
+  }
+}
+function syncBubblesLongChunked(bubbles) {
+  const arr = Array.isArray(bubbles) ? bubbles : Array.from(bubbles || []);
+  if (!arr.length) return;
+  if (arr.length <= 140) {
+    syncBubblesLongBatch(arr);
+    return;
+  }
+  // Measure the newest 100 bubbles immediately; chunk older off-screen bubbles across rAF frames
+  const immediate = arr.slice(-100);
+  const deferred = arr.slice(0, -100);
+  syncBubblesLongBatch(immediate);
+  longSyncChunkQueue = deferred.concat(longSyncChunkQueue);
+  if (!longSyncChunkRaf) longSyncChunkRaf = requestAnimationFrame(flushLongSyncChunk);
+}
 function syncAllBubbleLong() {
   const scope = messagesEl || document;
-  syncBubblesLongBatch(scope.querySelectorAll(".msg .bubble"));
+  longSyncChunkQueue = [];
+  if (longSyncChunkRaf) { cancelAnimationFrame(longSyncChunkRaf); longSyncChunkRaf = 0; }
+  syncBubblesLongChunked(scope.querySelectorAll(".msg .bubble"));
 }
 let longSyncQueued = false;
 let longSyncAll = false;
 const longSyncTargets = new Set();
+function scheduleLongSyncBatch(bubbles) {
+  if (!bubbles || !bubbles.length) return;
+  for (let i = 0; i < bubbles.length; i++) {
+    const b = bubbles[i];
+    if (b && b.nodeType === 1) longSyncTargets.add(b);
+  }
+  if (longSyncQueued) return;
+  longSyncQueued = true;
+  requestAnimationFrame(() => {
+    longSyncQueued = false;
+    const doAll = longSyncAll;
+    longSyncAll = false;
+    if (doAll) {
+      longSyncTargets.clear();
+      syncAllBubbleLong();
+    } else if (longSyncTargets.size) {
+      const list = [...longSyncTargets];
+      longSyncTargets.clear();
+      syncBubblesLongChunked(list);
+    }
+  });
+}
 function scheduleLongSync(bubble) {
   if (bubble && bubble.nodeType === 1) longSyncTargets.add(bubble);
   else longSyncAll = true;
@@ -4891,7 +5225,7 @@ function scheduleLongSync(bubble) {
     } else if (longSyncTargets.size) {
       const list = [...longSyncTargets];
       longSyncTargets.clear();
-      syncBubblesLongBatch(list);
+      syncBubblesLongChunked(list);
     }
   });
 }
@@ -5116,6 +5450,21 @@ function addMessageDom(m) {
   if (m.t === "voice") return addVoiceBubble(m);
   if (m.t === "img") return addImgBubble(m);
   return addTextBubble(m);
+}
+function syncPrependedNodes(host, limit) {
+  const box = host || messagesEl;
+  if (!box) return;
+  const kids = box.children;
+  const end = Math.min(kids.length, Math.max(0, limit || 0) + 6);
+  for (let i = 0; i < end; i++) {
+    const m = kids[i];
+    if (!m || !m.classList || !m.classList.contains("msg")) continue;
+    const next = kids[i + 1];
+    const same = !!(next && next.classList.contains("msg") && next.dataset.from && next.dataset.from === m.dataset.from);
+    m.classList.toggle("no-tail", same);
+    const incoming = !m.classList.contains("out") && !!m.dataset.from;
+    syncMsgAvatar(m, incoming && !same, incoming && same);
+  }
 }
 function updateBubbleTails() {
   keepTypingRowLast();
@@ -5489,6 +5838,9 @@ function applyRename(from, to, uid) {
       dmDom.delete(from);
     }
     if (dmScrollTops.has(from)) { dmScrollTops.set(to, dmScrollTops.get(from)); dmScrollTops.delete(from); }
+    if (dmFullMsgsByPeer.has(from)) { dmFullMsgsByPeer.set(to, dmFullMsgsByPeer.get(from)); dmFullMsgsByPeer.delete(from); }
+    if (dmRenderedStartByPeer.has(from)) { dmRenderedStartByPeer.set(to, dmRenderedStartByPeer.get(from)); dmRenderedStartByPeer.delete(from); }
+    if (dmRenderedEndByPeer.has(from)) { dmRenderedEndByPeer.set(to, dmRenderedEndByPeer.get(from)); dmRenderedEndByPeer.delete(from); }
     if (dmUnreadMap[from] != null) { dmUnreadMap[to] = dmUnreadMap[from]; delete dmUnreadMap[from]; saveDmUnread(); }
     for (const t of dmThreads) if (t.peer === from) t.peer = to;
     if (convo.mode === "dm" && convo.peer === from) {
@@ -5559,9 +5911,22 @@ function handleMessage(m) {
       const lm = stxt.match(/^(.+?)\s+left$/i);
       if (lm && lm[1]) stopTyping(lm[1].trim());
     }
-    if (historyLoading || !historyLoaded) {
+    if (historyLoading || !historyLoaded || roomWindowedJump) {
       if (historyBuffer.length >= 200) historyBuffer.shift();
       historyBuffer.push(m);
+      if (roomWindowedJump && m.t !== "system") {
+        const mine = isMine(m);
+        if (mine) {
+          returnRoomToLatest();
+        } else {
+          if (convo.mode === "room" && m.from) playNotify();
+          showMessageNotification(m);
+          unreadCount++;
+          updateBackBadge();
+          updateScrollBtn();
+          if (typeof refreshListView === "function") refreshListView();
+        }
+      }
       return;
     }
     if (alreadyRendered(roomMessagesEl, m)) return;
@@ -5635,6 +6000,9 @@ function handleMessage(m) {
     }
     dmDom.clear();
     dmScrollTops.clear();
+    dmFullMsgsByPeer.clear();
+    dmRenderedStartByPeer.clear();
+    dmRenderedEndByPeer.clear();
     for (const k of Object.keys(dmUnreadMap)) delete dmUnreadMap[k];
     for (const k of Object.keys(dmUnreadBumpAt)) delete dmUnreadBumpAt[k];
     saveDmUnread();
@@ -5909,12 +6277,23 @@ async function sbDmMirrorClear(peer) {
     await fetch(SB_URL + "/rest/v1/messages?type=eq." + (await dmThreadKey(myName, peer)), { method: "DELETE", headers: SB_H });
   } catch (e) {}
 }
-// Everything Supabase holds for one pair, oldest first. `owner` defaults to you.
+// Everything Supabase holds for one pair, oldest first (paginated past PostgREST row caps). `owner` defaults to you.
 async function sbDmFetch(peer, owner) {
   const key = await dmThreadKey(owner || myName, peer);
-  const res = await fetch(SB_URL + "/rest/v1/messages?select=" + HISTORY_SEL + "&type=eq." + key + "&order=ts.asc&limit=5000", { headers: SB_H });
-  const rows = await res.json().catch(() => null);
-  return Array.isArray(rows) ? rows : [];
+  const all = [];
+  const batchSize = 500;
+  let cursorTs = 0;
+  for (let page = 0; page < 200; page++) {
+    let url = SB_URL + "/rest/v1/messages?select=" + HISTORY_SEL + "&type=eq." + key + "&order=ts.asc&limit=" + batchSize;
+    if (cursorTs > 0) url += "&ts=gt." + cursorTs;
+    const rows = await sbFetchRows(url);
+    if (!rows.length) break;
+    all.push(...rows);
+    const maxTs = Number(rows[rows.length - 1] && rows[rows.length - 1].ts) || 0;
+    if (rows.length < batchSize || !maxTs || maxTs <= cursorTs) break;
+    cursorTs = maxTs;
+  }
+  return all;
 }
 function sbDmRowToMsg(row) {
   let meta = {};
@@ -6174,10 +6553,13 @@ function updateQuotesForTarget(target) {
     }
   }
 }
-function rehydrateReplyQuotesInDom(host) {
+function rehydrateReplyQuotesInDom(host, maxNodes) {
   const box = host || roomMessagesEl;
   if (!box) return;
-  for (const n of box.children) {
+  const kids = box.children;
+  const limit = maxNodes ? Math.min(kids.length, maxNodes) : kids.length;
+  for (let i = 0; i < limit; i++) {
+    const n = kids[i];
     const mm = msgByWrap.get(n);
     if (!mm || !mm.replyTo || !isReplyIncomplete(mm.replyTo)) continue;
     enrichReply(mm);
@@ -6188,12 +6570,15 @@ function rehydrateReplyQuotesInDom(host) {
   }
 }
 const replyFetchTried = new Set();
-async function resolveMissingReplies(host) {
+async function resolveMissingReplies(host, maxNodes) {
   const box = host || roomMessagesEl;
   if (!box) return;
   const sbTargets = new Map();
   const liveTargets = [];
-  for (const n of box.children) {
+  const kids = box.children;
+  const limit = maxNodes ? Math.min(kids.length, maxNodes) : kids.length;
+  for (let i = 0; i < limit; i++) {
+    const n = kids[i];
     const mm = msgByWrap.get(n);
     if (!mm || !mm.replyTo || !isReplyIncomplete(mm.replyTo)) continue;
     const r = mm.replyTo;
@@ -6336,6 +6721,7 @@ function firstRealNode() {
 function renderRowsInto(rows) {
   let count = 0;
   const frag = document.createDocumentFragment();
+  const newBubbles = [];
   let prevFrom = withMsgHost(roomMessagesEl, () => lastMessageFrom());
   for (const row of rows) {
     try {
@@ -6350,19 +6736,24 @@ function renderRowsInto(rows) {
       // remembered above either way, so it can never be drawn twice.
       if (alreadyRendered(roomMessagesEl, m)) continue;
       const grouped = !!(prevFrom && m.from && prevFrom === m.from);
-      frag.appendChild(withMsgHost(roomMessagesEl, () => buildMessageDom(m, grouped)));
+      const wrap = withMsgHost(roomMessagesEl, () => buildMessageDom(m, grouped));
+      wrap.classList.add("noAnim");
+      frag.appendChild(wrap);
+      const b = wrap && wrap.querySelector ? wrap.querySelector(".bubble") : null;
+      if (b) newBubbles.push(b);
       prevFrom = m.from || null;
       count++;
     } catch (e) { console.error("render-sb-row", row.id, e); }
   }
   if (count) {
     roomMessagesEl.appendChild(frag);
-    scheduleLongSync();
+    scheduleLongSyncBatch(newBubbles);
   }
   return count;
 }
 function prependRows(rows) {
   const frag = document.createDocumentFragment();
+  const newBubbles = [];
   const ref = firstRealNode();
   const refMsg = (ref && ref.classList.contains("msg")) ? (msgByWrap.get(ref) || null) : null;
   let prev = null;
@@ -6375,7 +6766,11 @@ function prependRows(rows) {
     const m = enrichReply(sbRowToMsg(row));
     if (!m) continue;
     const grouped = !!(prev && prev.from === m.from);
-    frag.appendChild(withMsgHost(roomMessagesEl, () => buildMessageDom(m, grouped)));
+    const wrap = withMsgHost(roomMessagesEl, () => buildMessageDom(m, grouped));
+    wrap.classList.add("noAnim");
+    frag.appendChild(wrap);
+    const b = wrap && wrap.querySelector ? wrap.querySelector(".bubble") : null;
+    if (b) newBubbles.push(b);
     prev = m;
     count++;
   }
@@ -6390,7 +6785,7 @@ function prependRows(rows) {
   } else {
     roomMessagesEl.appendChild(frag);
   }
-  scheduleLongSync();
+  scheduleLongSyncBatch(newBubbles);
   return count;
 }
 function maybeLoadOlder() {
@@ -6403,9 +6798,6 @@ async function loadOlder() {
   if (loadingOlder || allOlderLoaded) return;
   loadingOlder = true;
   showOlderLoader(true);
-  const anchor = firstRealNode();
-  const anchorTop = anchor ? anchor.getBoundingClientRect().top : null;
-  const scrollTop = scrollCtnEl.scrollTop;
   let added = 0;
   try {
     const prevOldest = oldestLoadedTs;
@@ -6414,12 +6806,23 @@ async function loadOlder() {
     const minTs = Math.min.apply(null, rows.map(rowTs).filter((t) => t > 0));
     if (isFinite(minTs)) oldestLoadedTs = Math.min(oldestLoadedTs || Infinity, minTs);
     const real = rows.filter(rowDomWorth).reverse();
-    if (real.length) added = prependRows(real);
-    if (added > 0) {
-      rehydrateReplyQuotesInDom(roomMessagesEl);
-      resolveMissingReplies(roomMessagesEl);
-      reclassifyOwnership();
-      if (translateOn) translateViewport();
+    if (real.length) {
+      // Measure scroll right BEFORE inserting (not before the async network await)
+      const prevScrollHeight = roomScrollCtn.scrollHeight;
+      const prevScrollTop = roomScrollCtn.scrollTop;
+      showOlderLoader(false);
+      added = prependRows(real);
+      if (added > 0) {
+        syncPrependedNodes(roomMessagesEl, added + 2);
+        const delta = roomScrollCtn.scrollHeight - prevScrollHeight;
+        roomScrollCtn.scrollTop = Math.max(16, prevScrollTop + delta);
+        const scopeLimit = added + 25;
+        rehydrateReplyQuotesInDom(roomMessagesEl, scopeLimit);
+        resolveMissingReplies(roomMessagesEl, scopeLimit);
+        scheduleDaySeps();
+        scheduleReplyCounts();
+        if (translateOn) translateViewport();
+      }
     }
     if (rows.length < OLDER_PAGE || !isFinite(minTs) || (prevOldest && oldestLoadedTs >= prevOldest) || (clearedAt && minTs <= clearedAt)) {
       allOlderLoaded = true;
@@ -6431,12 +6834,6 @@ async function loadOlder() {
     if (olderFailures >= 3) allOlderLoaded = true;
   } finally {
     showOlderLoader(false);
-    if (anchor && anchor.isConnected && anchorTop != null) {
-      scrollCtnEl.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
-    } else if (scrollTop != null) {
-      scrollCtnEl.scrollTop = scrollTop;
-    }
-    if (added > 0 && scrollCtnEl.scrollTop < 16) scrollCtnEl.scrollTop = 16;
     loadingOlder = false;
   }
 }
@@ -6825,13 +7222,16 @@ try { localStorage.removeItem("tgGeo_" + (window.generatorName || "chat")); } ca
 let historyLoaded = false;
 let historyLoading = false;
 let historyBuffer = [];
-const INITIAL_HISTORY_PAGE = 150;
-const OLDER_PAGE = 100;
-const OLDER_TRIGGER_PX = 480;
+const INITIAL_HISTORY_PAGE = 120;
+const OLDER_PAGE = 50;
+const OLDER_TRIGGER_PX = 650;
 const olderLoader = document.getElementById("olderLoader");
-let loadingOlder = false;
-let allOlderLoaded = false;
-let oldestLoadedTs = null;
+var loadingOlder = false;
+var loadingNewer = false;
+var allOlderLoaded = false;
+var roomWindowedJump = false;
+var oldestLoadedTs = null;
+var newestLoadedTs = null;
 const seenMsgIds = new Set();
 
 // Reclaim our own saved nickname after a (re)connect. Our own stale presence
@@ -8707,6 +9107,7 @@ function withScrollPinned(fn, anchorEl) {
 }
 
 function beginSelection(wrap, m) {
+  if (typeof closeMsgSearch === "function") closeMsgSearch();
   selectionMode = true;
   closeReactionBar();
   closeEmojiPicker();
@@ -9618,7 +10019,7 @@ function syncVisualViewport() {
   if (rxWhoOpen()) positionReactionWho();
   if (rxPickOpen()) positionEmojiPicker();
   if (appHost.classList.contains("panel-open")) syncPanelRaise();
-  if (typeof stickyPlace === "function") stickyPlace();
+  if (typeof stickyPlace === "function") stickyPlace(true);
 }
 window.addEventListener("resize", syncVisualViewport);
 if (window.visualViewport) {
@@ -9969,6 +10370,7 @@ function syncSettingsPage() {
 
 function openSettingsPage() {
   if (!settingsPage) return;
+  if (typeof closeMsgSearch === "function") closeMsgSearch();
   menuPop.classList.add("hide");
   translatePop.classList.add("hide");
   textSizePop.classList.add("hide");
@@ -10270,6 +10672,846 @@ function onChatAreaClick(e) {
 }
 messagesEl.addEventListener("click", onChatAreaClick);
 dmMessagesEl.addEventListener("click", onChatAreaClick);
+
+/* ---------- in-chat message search (Telegram-style card + instant windowed reload) ---------- */
+const searchHeaderBtn = document.getElementById("searchHeaderBtn");
+const searchMsgItem = document.getElementById("searchMsgItem");
+const msgSearchCloseBtn = document.getElementById("msgSearchCloseBtn");
+const msgSearchInput = document.getElementById("msgSearchInput");
+const msgSearchCount = document.getElementById("msgSearchCount");
+const msgSearchPrevBtn = document.getElementById("msgSearchPrevBtn");
+const msgSearchNextBtn = document.getElementById("msgSearchNextBtn");
+const msgSearchResultsEl = document.getElementById("msgSearchResults");
+const msgSearchTopbarEl = document.getElementById("topbar");
+
+var msgSearchOpen = false;
+var msgSearchListOpen = false;
+var msgSearchMatches = [];
+var msgSearchIdx = -1;
+var msgSearchActiveWrap = null;
+var msgSearchRemotePending = false;
+var msgSearchJumping = false;
+var msgSearchAbortCtrl = null;
+var msgSearchSeq = 0;
+var msgSearchRenderedCount = 0;
+var dmLoadingPeer = null;
+
+function setMsgSearchListOpen(open) {
+  const show = !!(open && msgSearchOpen && msgSearchInput && msgSearchInput.value.trim().length > 0);
+  msgSearchListOpen = show;
+  if (msgSearchResultsEl) msgSearchResultsEl.classList.toggle("hide", !show);
+  if (msgSearchTopbarEl) msgSearchTopbarEl.classList.toggle("hasSearchResults", show);
+}
+
+function fmtSearchDate(ts) {
+  const n = Number(ts) || 0;
+  if (!n) return "";
+  const d = new Date(n);
+  if (isNaN(d.getTime())) return "";
+  const now = new Date();
+  if (d.getFullYear() === now.getFullYear()) {
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function appendHighlightedText(parent, text, qLower, trimPrefix) {
+  const raw = String(text || "").replace(/\s+/g, " ").trim();
+  if (!raw) return;
+  let display = raw;
+  if (trimPrefix && qLower) {
+    const idx = raw.toLowerCase().indexOf(qLower);
+    if (idx > 42) {
+      display = "…" + raw.slice(Math.max(0, idx - 22)).trimStart();
+    }
+  }
+  if (!qLower) {
+    parent.appendChild(document.createTextNode(display));
+    return;
+  }
+  const lower = display.toLowerCase();
+  const qLen = qLower.length;
+  let pos = 0;
+  let hit = lower.indexOf(qLower, pos);
+  while (hit !== -1) {
+    if (hit > pos) parent.appendChild(document.createTextNode(display.slice(pos, hit)));
+    const sp = document.createElement("span");
+    sp.className = "msgSearchHit";
+    sp.textContent = display.slice(hit, hit + qLen);
+    parent.appendChild(sp);
+    pos = hit + qLen;
+    hit = lower.indexOf(qLower, pos);
+  }
+  if (pos < display.length) parent.appendChild(document.createTextNode(display.slice(pos)));
+}
+
+function buildSearchResultRow(item, idx, qLower) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "msgSearchRow" + (idx === msgSearchIdx ? " active" : "");
+  row.setAttribute("role", "option");
+  row.dataset.sidx = String(idx);
+
+  const av = document.createElement("span");
+  av.className = "msgSearchAv" + (item.from === "admin" ? " adminAvatar" : "");
+  paintAvatar(av, item.from || "?");
+  av.removeAttribute("title");
+  row.appendChild(av);
+
+  const body = document.createElement("span");
+  body.className = "msgSearchBody";
+
+  const top = document.createElement("span");
+  top.className = "msgSearchTop";
+
+  const senderWrap = document.createElement("span");
+  senderWrap.className = "msgSearchSenderWrap";
+  const senderEl = document.createElement("span");
+  senderEl.className = "msgSearchSender";
+  appendHighlightedText(senderEl, item.from || "Unknown", qLower, false);
+  senderWrap.appendChild(senderEl);
+  if (item.from === "admin") senderWrap.appendChild(adminBadgeEl());
+  else if (item.from && verifiedSet.has(item.from)) senderWrap.appendChild(verifiedBadgeEl());
+  top.appendChild(senderWrap);
+
+  const dateEl = document.createElement("span");
+  dateEl.className = "msgSearchDate";
+  dateEl.textContent = fmtSearchDate(item.ts);
+  top.appendChild(dateEl);
+  body.appendChild(top);
+
+  const preview = document.createElement("span");
+  preview.className = "msgSearchPreview";
+  const previewText = item.text || (item.kind === "img" ? "Photo" : item.kind === "voice" ? "Voice message" : "");
+  appendHighlightedText(preview, previewText, qLower, true);
+  body.appendChild(preview);
+
+  row.appendChild(body);
+  return row;
+}
+
+function appendMoreSearchResultRows(limit) {
+  if (!msgSearchResultsEl) return;
+  const qLower = msgSearchInput ? msgSearchInput.value.trim().toLowerCase() : "";
+  const end = Math.min(msgSearchMatches.length, msgSearchRenderedCount + (limit || 60));
+  if (end <= msgSearchRenderedCount) return;
+  const frag = document.createDocumentFragment();
+  for (let i = msgSearchRenderedCount; i < end; i++) {
+    frag.appendChild(buildSearchResultRow(msgSearchMatches[i], i, qLower));
+  }
+  msgSearchResultsEl.appendChild(frag);
+  msgSearchRenderedCount = end;
+}
+
+function renderMsgSearchResults() {
+  if (!msgSearchResultsEl) return;
+  const q = msgSearchInput ? msgSearchInput.value.trim() : "";
+  if (!msgSearchOpen || !q) {
+    msgSearchResultsEl.textContent = "";
+    msgSearchRenderedCount = 0;
+    setMsgSearchListOpen(false);
+    return;
+  }
+  const isBusy = (convo.mode === "room" && msgSearchRemotePending) ||
+    (convo.mode === "dm" && dmLoadingPeer === convo.peer);
+  msgSearchResultsEl.textContent = "";
+  msgSearchRenderedCount = 0;
+  if (!msgSearchMatches.length) {
+    const empty = document.createElement("div");
+    empty.className = "msgSearchEmpty";
+    empty.textContent = isBusy ? "Searching…" : "No messages found";
+    msgSearchResultsEl.appendChild(empty);
+    return;
+  }
+  appendMoreSearchResultRows(80);
+}
+
+function syncSearchActiveRow() {
+  if (!msgSearchResultsEl) return;
+  for (const prev of msgSearchResultsEl.querySelectorAll(".msgSearchRow.active")) {
+    prev.classList.remove("active");
+  }
+  if (msgSearchIdx >= 0) {
+    const cur = msgSearchResultsEl.querySelector('.msgSearchRow[data-sidx="' + msgSearchIdx + '"]');
+    if (cur) cur.classList.add("active");
+  }
+}
+
+function clearMsgSearchHighlights() {
+  const wrap = msgSearchActiveWrap;
+  msgSearchActiveWrap = null;
+  if (!wrap) return;
+  wrap.classList.remove("msgSearchActive");
+  const marks = wrap.querySelectorAll("mark.msgSearchMark");
+  if (!marks.length) return;
+  const parents = new Set();
+  for (const mk of marks) {
+    const p = mk.parentNode;
+    if (!p) continue;
+    p.replaceChild(document.createTextNode(mk.textContent || ""), mk);
+    parents.add(p);
+  }
+  for (const p of parents) p.normalize();
+}
+
+function highlightElementMatches(root, queryLower) {
+  if (!root || !queryLower) return 0;
+  const qLen = queryLower.length;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    if (!node.nodeValue || !node.parentElement) continue;
+    if (node.parentElement.closest("mark.msgSearchMark")) continue;
+    if (node.nodeValue.toLowerCase().includes(queryLower)) textNodes.push(node);
+  }
+  let count = 0;
+  for (const tn of textNodes) {
+    const val = tn.nodeValue;
+    const lower = val.toLowerCase();
+    const frag = document.createDocumentFragment();
+    let pos = 0;
+    let hit = lower.indexOf(queryLower, pos);
+    while (hit !== -1) {
+      if (hit > pos) frag.appendChild(document.createTextNode(val.slice(pos, hit)));
+      const mk = document.createElement("mark");
+      mk.className = "msgSearchMark current";
+      mk.textContent = val.slice(hit, hit + qLen);
+      frag.appendChild(mk);
+      count++;
+      pos = hit + qLen;
+      hit = lower.indexOf(queryLower, pos);
+    }
+    if (pos < val.length) frag.appendChild(document.createTextNode(val.slice(pos)));
+    if (tn.parentNode) tn.parentNode.replaceChild(frag, tn);
+  }
+  return count;
+}
+
+function updateMsgSearchUi() {
+  const q = msgSearchInput ? msgSearchInput.value.trim() : "";
+  const total = msgSearchMatches.length;
+  const isBusy = msgSearchJumping ||
+    (convo.mode === "room" && msgSearchRemotePending) ||
+    (convo.mode === "dm" && dmLoadingPeer === convo.peer);
+  if (msgSearchCount) {
+    if (!q) {
+      msgSearchCount.classList.add("hide");
+      msgSearchCount.classList.remove("empty");
+      msgSearchCount.textContent = "";
+    } else if (isBusy) {
+      msgSearchCount.classList.remove("hide", "empty");
+      msgSearchCount.textContent = total > 0
+        ? (msgSearchIdx >= 0 ? ((msgSearchIdx + 1) + " / " + total + "…") : (total + "…"))
+        : "…";
+    } else if (total === 0) {
+      msgSearchCount.classList.remove("hide");
+      msgSearchCount.classList.add("empty");
+      msgSearchCount.textContent = "0 / 0";
+    } else if (msgSearchIdx >= 0) {
+      msgSearchCount.classList.remove("hide", "empty");
+      msgSearchCount.textContent = (msgSearchIdx + 1) + " / " + total;
+    } else {
+      msgSearchCount.classList.remove("hide", "empty");
+      msgSearchCount.textContent = String(total);
+    }
+  }
+  if (msgSearchPrevBtn) msgSearchPrevBtn.disabled = msgSearchJumping || total === 0 || (msgSearchIdx >= total - 1);
+  if (msgSearchNextBtn) msgSearchNextBtn.disabled = msgSearchJumping || total === 0 || (msgSearchIdx <= 0);
+}
+
+function findRenderedWrapForMatch(host, item) {
+  if (!host || !item) return null;
+  if (item.wrap && item.wrap.isConnected && item.wrap.parentNode === host) return item.wrap;
+  const targetId = item.id ? String(item.id) : "";
+  const targetTs = Number(item.ts) || 0;
+  const targetFrom = String(item.from || "");
+  let best = null;
+  let bestDiff = Infinity;
+  for (const n of host.children) {
+    if (!n.classList || !n.classList.contains("msg")) continue;
+    const nid = (n.dataset && n.dataset.id) || "";
+    if (targetId && nid === targetId) {
+      item.wrap = n;
+      return n;
+    }
+    if (targetTs) {
+      const nTs = Number(n.dataset && n.dataset.ts) || 0;
+      const nFrom = (n.dataset && n.dataset.from) || "";
+      const diff = Math.abs(nTs - targetTs);
+      if (targetFrom && nFrom === targetFrom && diff === 0) {
+        item.wrap = n;
+        return n;
+      }
+      if (targetFrom && nFrom === targetFrom && diff <= 1500 && diff < bestDiff) {
+        best = n;
+        bestDiff = diff;
+      }
+    }
+  }
+  if (best) item.wrap = best;
+  return best;
+}
+
+function paintActiveSearchWrap(wrap, queryLower) {
+  clearMsgSearchHighlights();
+  if (!wrap || !wrap.isConnected) return;
+  msgSearchActiveWrap = wrap;
+  wrap.classList.add("msgSearchActive");
+  if (queryLower) {
+    const bt = wrap.querySelector(".btext");
+    const cap = wrap.querySelector(".caption");
+    if (bt) highlightElementMatches(bt, queryLower);
+    if (cap) highlightElementMatches(cap, queryLower);
+  }
+  // Instant reload jump — zero smooth scrolling
+  wrap.scrollIntoView({ block: "center", behavior: "auto" });
+  requestAnimationFrame(() => {
+    if (wrap && wrap.isConnected && msgSearchActiveWrap === wrap) {
+      wrap.scrollIntoView({ block: "center", behavior: "auto" });
+      updateScrollBtn();
+    }
+  });
+  wrap.classList.remove("flash");
+  void wrap.offsetWidth;
+  wrap.classList.add("flash");
+  setTimeout(() => { if (wrap && wrap.isConnected) wrap.classList.remove("flash"); }, 1200);
+}
+
+// Server-side full-history room search via Supabase PostgREST ilike.
+function buildPgIlikePattern(q) {
+  const safe = String(q || "").replace(/[\\"%_*]/g, "*");
+  return /[,().:\s]/.test(safe) ? '"*' + safe + '*"' : "*" + safe + "*";
+}
+
+async function sbSearchRoomMessages(query, signal) {
+  const qLower = String(query || "").trim().toLowerCase();
+  if (!qLower) return [];
+  const pat = buildPgIlikePattern(query.trim());
+  const safeFallback = "*" + String(query || "").trim().replace(/[\\"%_*]/g, "*") + "*";
+  const all = [];
+  const batchSize = 500;
+  let cursorTs = 0;
+  for (let page = 0; page < 10; page++) {
+    let url = SB_URL + "/rest/v1/messages?select=id,ts,sender,type,text&" + SB_ROOM_ONLY +
+      "&type=in.(chat,img)&or=(text.ilike." + encodeURIComponent(pat) + ",sender.ilike." + encodeURIComponent(pat) + ")" +
+      "&order=ts.desc&limit=" + batchSize;
+    if (clearedAt) url += "&ts=gt." + clearedAt;
+    if (cursorTs > 0) url += "&ts=lt." + cursorTs;
+    const res = await fetch(url, { headers: SB_H, signal });
+    let rows = res.ok ? await res.json().catch(() => null) : null;
+    if (!Array.isArray(rows)) {
+      let fbUrl = SB_URL + "/rest/v1/messages?select=id,ts,sender,type,text&" + SB_ROOM_ONLY +
+        "&type=in.(chat,img)&text=ilike." + encodeURIComponent(safeFallback) +
+        "&order=ts.desc&limit=" + batchSize;
+      if (clearedAt) fbUrl += "&ts=gt." + clearedAt;
+      if (cursorTs > 0) fbUrl += "&ts=lt." + cursorTs;
+      const fbRes = await fetch(fbUrl, { headers: SB_H, signal });
+      rows = fbRes.ok ? await fbRes.json().catch(() => null) : null;
+    }
+    if (!Array.isArray(rows) || !rows.length) break;
+    for (const row of rows) {
+      if (!row) continue;
+      if (row.type === "chat" && !(row.text && String(row.text).trim())) continue;
+      const text = String(row.text || "");
+      const sender = String(row.sender || "");
+      if (text.toLowerCase().includes(qLower) || sender.toLowerCase().includes(qLower)) {
+        all.push({
+          wrap: null,
+          id: "sb-" + row.id,
+          ts: Number(row.ts) || 0,
+          from: sender,
+          text,
+          kind: row.type || "chat"
+        });
+      }
+    }
+    const minTs = Math.min.apply(null, rows.map(rowTs).filter((t) => t > 0));
+    if (rows.length < batchSize || !isFinite(minTs) || (cursorTs > 0 && minTs >= cursorTs)) break;
+    cursorTs = minTs;
+  }
+  return all;
+}
+
+// Instant windowed reload for Room: replaces #roomMessages with ~80 messages centered on targetItem.ts.
+// Zero intermediate messages fetched or rendered, zero scrolling lag.
+async function jumpRoomToWindow(targetItem) {
+  if (convo.mode !== "room" || !targetItem || !targetItem.ts) return;
+  const targetTs = Number(targetItem.ts) || 0;
+  if (!targetTs) return;
+  loadingOlder = true;
+  loadingNewer = true;
+  showOlderLoader(false);
+  try {
+    const WINDOW_HALF = 40;
+    let qBefore = SB_URL + "/rest/v1/messages?select=" + HISTORY_SEL + "&" + SB_ROOM_ONLY +
+      "&ts=lte." + targetTs + "&order=ts.desc&limit=" + WINDOW_HALF;
+    if (clearedAt) qBefore += "&ts=gt." + clearedAt;
+    const qAfter = SB_URL + "/rest/v1/messages?select=" + HISTORY_SEL + "&" + SB_ROOM_ONLY +
+      "&ts=gt." + targetTs + "&order=ts.asc&limit=" + WINDOW_HALF;
+    const [beforeRows, afterRows] = await Promise.all([sbFetchRows(qBefore), sbFetchRows(qAfter)]);
+    if (convo.mode !== "room") return;
+    const combined = beforeRows.filter(rowDomWorth).reverse().concat(afterRows.filter(rowDomWorth));
+    if (!combined.length) return;
+    clearMsgSearchHighlights();
+    msgByWrapCleanup(roomMessagesEl);
+    seenMsgIds.clear();
+    roomMessagesEl.textContent = "";
+    renderRowsInto(combined);
+    const allTs = combined.map(rowTs).filter((t) => t > 0);
+    oldestLoadedTs = allTs.length ? Math.min.apply(null, allTs) : targetTs;
+    newestLoadedTs = allTs.length ? Math.max.apply(null, allTs) : targetTs;
+    allOlderLoaded = beforeRows.length < WINDOW_HALF || (clearedAt && oldestLoadedTs <= clearedAt);
+    roomWindowedJump = afterRows.length >= WINDOW_HALF;
+    if (!roomWindowedJump) {
+      newestLoadedTs = null;
+      flushHistoryBuffer();
+    }
+    syncPrependedNodes(roomMessagesEl, combined.length + 2);
+    rehydrateReplyQuotesInDom(roomMessagesEl);
+    resolveMissingReplies(roomMessagesEl);
+    refreshDaySeps();
+    scheduleReplyCounts();
+    if (translateOn) translateViewport();
+    updateScrollBtn();
+  } catch (e) {
+    console.error("search-jump-window", e);
+  } finally {
+    loadingOlder = false;
+    loadingNewer = false;
+  }
+}
+
+async function loadNewerRoom() {
+  if (loadingNewer || !roomWindowedJump || !newestLoadedTs || convo.mode !== "room") return;
+  loadingNewer = true;
+  try {
+    const q = SB_URL + "/rest/v1/messages?select=" + HISTORY_SEL + "&" + SB_ROOM_ONLY +
+      "&ts=gt." + newestLoadedTs + "&order=ts.asc&limit=" + OLDER_PAGE;
+    const rows = await sbFetchRows(q);
+    if (convo.mode !== "room") return;
+    if (!rows.length) {
+      roomWindowedJump = false;
+      newestLoadedTs = null;
+      flushHistoryBuffer();
+      updateScrollBtn();
+      return;
+    }
+    const maxTs = Math.max.apply(null, rows.map(rowTs).filter((t) => t > 0));
+    if (isFinite(maxTs) && maxTs > newestLoadedTs) newestLoadedTs = maxTs;
+    const real = rows.filter(rowDomWorth);
+    if (real.length) {
+      renderRowsInto(real);
+      updateBubbleTails();
+      scheduleDaySeps();
+      scheduleReplyCounts();
+      if (translateOn) translateViewport();
+    }
+    if (rows.length < OLDER_PAGE) {
+      roomWindowedJump = false;
+      newestLoadedTs = null;
+      flushHistoryBuffer();
+    }
+    updateScrollBtn();
+  } catch (e) {
+    console.error("load-newer-room", e);
+  } finally {
+    loadingNewer = false;
+  }
+}
+
+function maybeLoadNewerRoom() {
+  if (!roomWindowedJump || loadingNewer || convo.mode !== "room") return;
+  if (roomScrollCtn.scrollHeight - roomScrollCtn.scrollTop - roomScrollCtn.clientHeight < OLDER_TRIGGER_PX) {
+    loadNewerRoom();
+  }
+}
+
+async function returnRoomToLatest() {
+  if (loadingNewer || convo.mode !== "room") return;
+  loadingNewer = true;
+  loadingOlder = true;
+  try {
+    const latest = await sbFetchOlder(null, INITIAL_HISTORY_PAGE);
+    if (convo.mode !== "room") return;
+    clearMsgSearchHighlights();
+    msgByWrapCleanup(roomMessagesEl);
+    seenMsgIds.clear();
+    roomMessagesEl.textContent = "";
+    const realLatest = latest.filter(rowDomWorth).reverse();
+    if (realLatest.length) renderRowsInto(realLatest);
+    const firstTs = latest.map(rowTs).filter((t) => t > 0);
+    oldestLoadedTs = firstTs.length ? Math.min.apply(null, firstTs) : null;
+    allOlderLoaded = latest.length < INITIAL_HISTORY_PAGE || !firstTs.length;
+    roomWindowedJump = false;
+    newestLoadedTs = null;
+    flushHistoryBuffer();
+    updateBubbleTails();
+    rehydrateReplyQuotesInDom(roomMessagesEl);
+    resolveMissingReplies(roomMessagesEl);
+    scheduleDaySeps();
+    scheduleReplyCounts();
+    if (translateOn) translateViewport();
+    scrollBottom(true);
+    clearUnreadState();
+    updateScrollBtn();
+  } catch (e) {
+    console.error("return-room-latest", e);
+  } finally {
+    loadingNewer = false;
+    loadingOlder = false;
+  }
+}
+
+async function focusMsgSearchMatch(idx) {
+  if (idx < 0 || idx >= msgSearchMatches.length) {
+    clearMsgSearchHighlights();
+    msgSearchIdx = -1;
+    syncSearchActiveRow();
+    updateMsgSearchUi();
+    return;
+  }
+  const seq = msgSearchSeq;
+  const qLower = msgSearchInput ? msgSearchInput.value.trim().toLowerCase() : "";
+  msgSearchIdx = idx;
+  syncSearchActiveRow();
+  const item = msgSearchMatches[idx];
+  const host = convo.mode === "dm" ? dmMessagesEl : roomMessagesEl;
+  let wrap = findRenderedWrapForMatch(host, item);
+  if (!wrap) {
+    msgSearchJumping = true;
+    updateMsgSearchUi();
+    try {
+      if (convo.mode === "dm" && typeof item.dmIndex === "number") {
+        const full = dmFullMsgsByPeer.get(convo.peer) || [];
+        const start = Math.max(0, item.dmIndex - 40);
+        const end = Math.min(full.length, item.dmIndex + 40);
+        renderDmWindow(convo.peer, start, end, false);
+      } else if (convo.mode === "room" && item.ts) {
+        await jumpRoomToWindow(item);
+      }
+    } finally {
+      msgSearchJumping = false;
+    }
+    if (seq !== msgSearchSeq || !msgSearchOpen) {
+      updateMsgSearchUi();
+      return;
+    }
+    wrap = findRenderedWrapForMatch(host, item);
+  }
+  if (wrap && wrap.isConnected) {
+    paintActiveSearchWrap(wrap, qLower);
+  } else {
+    clearMsgSearchHighlights();
+  }
+  updateMsgSearchUi();
+}
+
+function collectLocalMatches(qLower) {
+  const out = [];
+  if (convo.mode === "dm") {
+    const full = dmFullMsgsByPeer.get(convo.peer);
+    if (full && full.length) {
+      for (let i = full.length - 1; i >= 0; i--) {
+        const m = full[i];
+        if (!m || m.t === "system") continue;
+        const text = String(m.text || m.caption || "");
+        const from = String(m.from || "");
+        if (text.toLowerCase().includes(qLower) || from.toLowerCase().includes(qLower)) {
+          out.push({
+            wrap: null,
+            id: m.id ? String(m.id) : "",
+            ts: Number(m.ts) || 0,
+            from,
+            text,
+            kind: m.t || "chat",
+            dmIndex: i
+          });
+        }
+      }
+      return out;
+    }
+  }
+  const host = convo.mode === "dm" ? dmMessagesEl : roomMessagesEl;
+  if (!host) return out;
+  const kids = host.children;
+  for (let i = kids.length - 1; i >= 0; i--) {
+    const wrap = kids[i];
+    if (!wrap.classList || !wrap.classList.contains("msg")) continue;
+    const m = msgByWrap.get(wrap);
+    const rawText = (m && (m.text || m.caption)) ? String(m.text || m.caption) : "";
+    const sender = (wrap.dataset && wrap.dataset.from) || (m && m.from) || "";
+    let matched = rawText.toLowerCase().includes(qLower) || sender.toLowerCase().includes(qLower);
+    if (!matched && translateOn) {
+      const bt = wrap.querySelector(".btext");
+      if (bt && bt.textContent && bt.textContent.toLowerCase().includes(qLower)) matched = true;
+    }
+    if (matched) {
+      out.push({
+        wrap,
+        id: (wrap.dataset && wrap.dataset.id) || (m && m.id ? String(m.id) : ""),
+        ts: Number((wrap.dataset && wrap.dataset.ts) || (m && m.ts) || 0),
+        from: sender,
+        text: rawText,
+        kind: (m && m.t) || "chat"
+      });
+    }
+  }
+  return out;
+}
+
+function mergeSearchMatches(localList, remoteList) {
+  const merged = localList.slice();
+  const seenIds = new Set();
+  for (const m of merged) {
+    if (m.id) seenIds.add(m.id);
+  }
+  for (const r of remoteList) {
+    if (r.id && seenIds.has(r.id)) continue;
+    let dup = false;
+    if (r.ts) {
+      for (let i = 0; i < merged.length; i++) {
+        const loc = merged[i];
+        if (loc.from === r.from && loc.ts && Math.abs(loc.ts - r.ts) <= 1500) {
+          dup = true;
+          break;
+        }
+      }
+    }
+    if (!dup) {
+      if (r.id) seenIds.add(r.id);
+      merged.push(r);
+    }
+  }
+  merged.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return merged;
+}
+
+function runMsgSearch(opts) {
+  const options = opts || {};
+  if (msgSearchAbortCtrl) {
+    msgSearchAbortCtrl.abort();
+    msgSearchAbortCtrl = null;
+  }
+  const seq = ++msgSearchSeq;
+  msgSearchRemotePending = false;
+  clearMsgSearchHighlights();
+  msgSearchMatches = [];
+  msgSearchIdx = -1;
+  const q = msgSearchInput ? msgSearchInput.value.trim() : "";
+  if (!q || !messagesEl) {
+    renderMsgSearchResults();
+    updateMsgSearchUi();
+    return;
+  }
+  const qLower = q.toLowerCase();
+  const localMatches = collectLocalMatches(qLower);
+  msgSearchMatches = localMatches;
+  setMsgSearchListOpen(true);
+  renderMsgSearchResults();
+  updateMsgSearchUi();
+  if (options.autoJump && msgSearchMatches.length) {
+    setMsgSearchListOpen(false);
+    focusMsgSearchMatch(0);
+  }
+  // In Room mode, query Supabase server-side across ALL history (even when viewing a jumped window!)
+  if (convo.mode === "room" && (!allOlderLoaded || roomWindowedJump)) {
+    const ctrl = new AbortController();
+    msgSearchAbortCtrl = ctrl;
+    msgSearchRemotePending = true;
+    renderMsgSearchResults();
+    updateMsgSearchUi();
+    sbSearchRoomMessages(q, ctrl.signal).then((remoteMatches) => {
+      if (seq !== msgSearchSeq || !msgSearchOpen || convo.mode !== "room") return;
+      msgSearchRemotePending = false;
+      msgSearchAbortCtrl = null;
+      const prevItem = msgSearchIdx >= 0 ? msgSearchMatches[msgSearchIdx] : null;
+      msgSearchMatches = mergeSearchMatches(localMatches, remoteMatches);
+      if (prevItem) {
+        const keepIdx = msgSearchMatches.findIndex((it) =>
+          (prevItem.wrap && it.wrap === prevItem.wrap) ||
+          (prevItem.id && it.id === prevItem.id) ||
+          (prevItem.ts && it.ts === prevItem.ts && it.from === prevItem.from)
+        );
+        msgSearchIdx = keepIdx;
+      }
+      renderMsgSearchResults();
+      updateMsgSearchUi();
+      if (options.autoJump && msgSearchIdx === -1 && msgSearchMatches.length) {
+        setMsgSearchListOpen(false);
+        focusMsgSearchMatch(0);
+      }
+    }).catch((err) => {
+      if (err && err.name === "AbortError") return;
+      if (seq !== msgSearchSeq) return;
+      msgSearchRemotePending = false;
+      msgSearchAbortCtrl = null;
+      renderMsgSearchResults();
+      updateMsgSearchUi();
+    });
+  }
+}
+
+function stepMsgSearch(delta) {
+  const q = msgSearchInput ? msgSearchInput.value.trim() : "";
+  if (!q || msgSearchJumping) return;
+  const total = msgSearchMatches.length;
+  if (!total) return;
+  let next;
+  if (msgSearchIdx === -1) {
+    next = delta > 0 ? 0 : total - 1;
+  } else {
+    next = msgSearchIdx + delta;
+  }
+  if (next < 0 || next >= total) return;
+  setMsgSearchListOpen(false);
+  focusMsgSearchMatch(next);
+}
+
+function openMsgSearch() {
+  if (!msgSearchInput) return;
+  if (convo.mode !== "room" && convo.mode !== "dm") return;
+  if (selectionMode) endSelection();
+  menuPop.classList.add("hide");
+  translatePop.classList.add("hide");
+  textSizePop.classList.add("hide");
+  closeEmojiPanel();
+  closeGifPanel();
+  msgSearchOpen = true;
+  appHost.classList.add("searchMode");
+  updateMsgSearchUi();
+  requestAnimationFrame(() => {
+    msgSearchInput.focus();
+    if (msgSearchInput.value) msgSearchInput.select();
+  });
+  if (msgSearchInput.value.trim()) runMsgSearch();
+}
+
+function closeMsgSearch() {
+  if (!msgSearchOpen && !appHost.classList.contains("searchMode")) return;
+  if (msgSearchAbortCtrl) {
+    msgSearchAbortCtrl.abort();
+    msgSearchAbortCtrl = null;
+  }
+  msgSearchSeq++;
+  msgSearchRemotePending = false;
+  msgSearchJumping = false;
+  msgSearchOpen = false;
+  setMsgSearchListOpen(false);
+  appHost.classList.remove("searchMode");
+  clearMsgSearchHighlights();
+  msgSearchMatches = [];
+  msgSearchIdx = -1;
+  if (msgSearchResultsEl) msgSearchResultsEl.textContent = "";
+  msgSearchRenderedCount = 0;
+  if (msgSearchInput) {
+    msgSearchInput.value = "";
+    msgSearchInput.blur();
+  }
+  updateMsgSearchUi();
+}
+
+if (searchHeaderBtn) {
+  searchHeaderBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openMsgSearch();
+  });
+}
+if (searchMsgItem) {
+  searchMsgItem.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openMsgSearch();
+  });
+}
+if (msgSearchCloseBtn) {
+  msgSearchCloseBtn.addEventListener("click", () => closeMsgSearch());
+}
+if (msgSearchResultsEl) {
+  msgSearchResultsEl.addEventListener("click", (e) => {
+    const row = e.target && e.target.closest ? e.target.closest(".msgSearchRow") : null;
+    if (!row) return;
+    const idx = Number(row.dataset.sidx);
+    if (!isFinite(idx) || idx < 0 || idx >= msgSearchMatches.length) return;
+    setMsgSearchListOpen(false);
+    focusMsgSearchMatch(idx);
+  });
+  msgSearchResultsEl.addEventListener("scroll", () => {
+    if (msgSearchRenderedCount >= msgSearchMatches.length) return;
+    if (msgSearchResultsEl.scrollHeight - msgSearchResultsEl.scrollTop - msgSearchResultsEl.clientHeight < 200) {
+      appendMoreSearchResultRows(60);
+    }
+  }, { passive: true });
+}
+let msgSearchTimer = null;
+if (msgSearchInput) {
+  msgSearchInput.addEventListener("focus", () => {
+    if (msgSearchOpen && msgSearchInput.value.trim()) {
+      setMsgSearchListOpen(true);
+      if (!msgSearchResultsEl || !msgSearchResultsEl.childNodes.length) renderMsgSearchResults();
+    }
+  });
+  msgSearchInput.addEventListener("click", () => {
+    if (msgSearchOpen && msgSearchInput.value.trim()) {
+      setMsgSearchListOpen(true);
+    }
+  });
+  msgSearchInput.addEventListener("input", () => {
+    clearTimeout(msgSearchTimer);
+    if (!msgSearchInput.value.trim()) {
+      runMsgSearch();
+      return;
+    }
+    msgSearchTimer = setTimeout(() => runMsgSearch(), 180);
+  });
+  msgSearchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      clearTimeout(msgSearchTimer);
+      if (msgSearchMatches.length === 0 && msgSearchInput.value.trim()) {
+        runMsgSearch({ autoJump: true });
+      } else {
+        stepMsgSearch(e.shiftKey ? -1 : 1);
+      }
+    } else if (e.key === "ArrowDown" && msgSearchMatches.length) {
+      e.preventDefault();
+      stepMsgSearch(1);
+    } else if (e.key === "ArrowUp" && msgSearchMatches.length) {
+      e.preventDefault();
+      stepMsgSearch(-1);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      if (msgSearchListOpen) setMsgSearchListOpen(false);
+      else closeMsgSearch();
+    }
+  });
+}
+if (msgSearchPrevBtn) {
+  msgSearchPrevBtn.addEventListener("click", () => stepMsgSearch(1));
+}
+if (msgSearchNextBtn) {
+  msgSearchNextBtn.addEventListener("click", () => stepMsgSearch(-1));
+}
+document.addEventListener("click", (e) => {
+  if (!msgSearchListOpen) return;
+  if ((msgSearchTopbarEl && msgSearchTopbarEl.contains(e.target)) ||
+      (msgSearchResultsEl && msgSearchResultsEl.contains(e.target))) return;
+  setMsgSearchListOpen(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && msgSearchOpen) {
+    if (msgSearchListOpen) setMsgSearchListOpen(false);
+    else closeMsgSearch();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "f" || e.key === "F")) {
+    const anyModal = !!document.querySelector(".modal:not(.hide)");
+    const inSettings = !!(settingsPage && !settingsPage.classList.contains("hide"));
+    if (!anyModal && !inSettings && (convo.mode === "room" || convo.mode === "dm")) {
+      e.preventDefault();
+      openMsgSearch();
+    }
+  }
+});
 
 // Last thing in the module: nothing above is in a temporal dead zone any more,
 // so the first layout/list pass is safe to run (and it decides which layout the
